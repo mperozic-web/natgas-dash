@@ -1,6 +1,5 @@
 streamlit
 pandas
 requests
-yfinance==0.2.40
+yfinance
 pandas_ta
-numpy
