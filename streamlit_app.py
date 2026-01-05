@@ -2,49 +2,60 @@ import streamlit as st
 import pandas as pd
 import requests
 import io
-import datetime
 
 # --- KONFIGURACIJA STRANICE ---
-st.set_page_config(page_title="NatGas Bot V2", layout="wide", page_icon="⚡")
+st.set_page_config(page_title="NatGas Bot V2.1", layout="wide", page_icon="⚡")
 
-st.title("⚡ NatGas Trading Desk (Alpha 2.0)")
+st.title("⚡ NatGas Trading Desk (Beta)")
 st.markdown("### Modul 1: Vrijeme & Modul 2: Zalihe")
 st.markdown("---")
 
 # ==============================================================================
-# 🔑 SIGURNOSNA ZONA - TVOJ KLJUČ
+# 🔑 TVOJ EIA API KLJUČ (Integriran)
 # ==============================================================================
-# OVDJE ZALIJEPI SVOJ KLJUČ IZMEĐU NAVODNIKA:
-EIA_API_KEY = "UKanfPJLVukxpG4BTdDDSH4V4cVVtSNdk0JgEgai" 
+EIA_API_KEY = "UKanfPJLVukxpG4BTdDDSH4V4cVVtSNdk0JgEgai"
 # ==============================================================================
 
 # --- FUNKCIJE ZA DOHVAT PODATAKA (ENGINE ROOM) ---
 
 def get_noaa_data(url, name):
-    """Dohvaća meteorološke indekse (AO, NAO, PNA)"""
+    """Dohvaća meteorološke indekse s maskiranjem (User-Agent) da izbjegnemo blokadu"""
     try:
-        response = requests.get(url, timeout=5)
+        # Glumimo da smo običan preglednik
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        response = requests.get(url, headers=headers, timeout=10)
         response.raise_for_status()
+        
+        # Čitanje podataka
         data = pd.read_csv(io.StringIO(response.content.decode('utf-8')), sep='\s+', header=None, engine='python')
+        
+        if data.empty:
+            return None
+            
+        # Uzimamo prosjek zadnjeg dana (zadnji red)
         latest_data = data.iloc[-1]
         return latest_data.mean()
+        
     except Exception as e:
+        # Tiha greška - vratit će None pa ćemo ispisati upozorenje u sučelju
         return None
 
 def get_eia_storage(api_key):
     """Dohvaća EIA zalihe plina (Lower 48)"""
-    # EIA API v2 Endpoint
     url = "https://api.eia.gov/v2/natural-gas/stor/wkly/data/"
     
     params = {
         "api_key": api_key,
         "frequency": "weekly",
         "data[0]": "value",
-        "facets[series][]": "NW2_EPG0_SWO_R48_BCF", # Serija za Lower 48 Storage
+        "facets[series][]": "NW2_EPG0_SWO_R48_BCF",
         "sort[0][column]": "period",
         "sort[0][direction]": "desc",
         "offset": 0,
-        "length": 2 # Uzimamo zadnja dva tjedna da izračunamo promjenu
+        "length": 2
     }
     
     try:
@@ -73,28 +84,45 @@ def get_eia_storage(api_key):
 st.subheader("📡 Modul 1: Vremenski Signali (NOAA)")
 col1, col2, col3 = st.columns(3)
 
-# Linkovi
 AO_URL = "https://www.cpc.ncep.noaa.gov/products/precip/CWlink/daily_ao_index/ao.sprd2.daily"
 NAO_URL = "https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/nao.sprd2.daily"
 PNA_URL = "https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/pna.sprd2.daily"
 
+# --- AO ---
 with col1:
     ao = get_noaa_data(AO_URL, "AO")
-    if ao:
-        color = "off" if ao > 0 else "normal" # Pojednostavljeno za demo
-        st.metric("Arctic Oscillation (AO)", f"{ao:.2f}", delta="Bearish (Toplo)" if ao > 0 else "Bullish (Hladno)", delta_color=color)
+    if ao is not None:
+        val_str = f"{ao:.2f}"
+        # Logika: Pozitivan AO = Vrtlog jak = Hladnoća zaključana gore = BEARISH za US
+        label = "Bearish (Toplo)" if ao > 0 else "Bullish (Hladno)"
+        color = "inverse" # Crveno za Bearish, Zeleno za Bullish u Streamlitu
+        st.metric("Arctic Oscillation (AO)", val_str, delta=label, delta_color=color)
+    else:
+        st.warning("AO: Nema podataka (NOAA server)")
 
+# --- NAO ---
 with col2:
     nao = get_noaa_data(NAO_URL, "NAO")
-    if nao:
-        color = "off" if nao > 0 else "normal"
-        st.metric("North Atlantic (NAO)", f"{nao:.2f}", delta="Bearish (Otvoren)" if nao > 0 else "Bullish (Blokada)", delta_color=color)
+    if nao is not None:
+        val_str = f"{nao:.2f}"
+        # Logika: Pozitivan NAO = Nema bloka = Hladnoća bježi = BEARISH
+        label = "Bearish (Otvoren)" if nao > 0 else "Bullish (Blokada)"
+        color = "inverse"
+        st.metric("North Atlantic (NAO)", val_str, delta=label, delta_color=color)
+    else:
+        st.warning("NAO: Nema podataka (NOAA server)")
 
+# --- PNA ---
 with col3:
     pna = get_noaa_data(PNA_URL, "PNA")
-    if pna:
-        # PNA je pozitivan = Hladno na istoku (Bullish)
-        st.metric("Pacific North American (PNA)", f"{pna:.2f}", delta="Bullish (Hladan Istok)" if pna > 0 else "Bearish (Topli Istok)")
+    if pna is not None:
+        val_str = f"{pna:.2f}"
+        # Logika: Pozitivan PNA = Hladno na Istoku = BULLISH
+        label = "Bullish (Hladan Istok)" if pna > 0 else "Bearish (Topli Istok)"
+        color = "normal" # Ovdje je pozitivno zeleno
+        st.metric("Pacific North (PNA)", val_str, delta=label, delta_color=color)
+    else:
+        st.warning("PNA: Nema podataka (NOAA server)")
 
 st.markdown("---")
 
@@ -105,21 +133,17 @@ eia_data = get_eia_storage(EIA_API_KEY)
 
 if eia_data:
     col_a, col_b = st.columns(2)
-    
     with col_a:
         st.metric(
-            label=f"Ukupne Zalihe (Datum: {eia_data['date']})",
+            label=f"Ukupne Zalihe (Tjedan: {eia_data['date']})",
             value=f"{eia_data['value']} Bcf",
-            delta=f"{eia_data['change']} Bcf (Tjedna Promjena)",
-            delta_color="inverse" # Crveno ako rastu zalihe (loše za cijenu), Zeleno ako padaju
+            delta=f"{eia_data['change']} Bcf (Promjena)",
+            delta_color="inverse" # Crveno ako raste (loše), Zeleno ako pada (dobro)
         )
-    
     with col_b:
-        # Ovdje ćemo kasnije dodati usporedbu s 5-godišnjim prosjekom
-        st.info("💡 **Tumačenje:** Ako je 'Tjedna Promjena' pozitivna, zalihe rastu (Bearish). Ako je negativna, trošimo plin (Bullish).")
-
+        st.info("💡 **Tumačenje:** Ako je broj ispod crven (pozitivan), zalihe rastu -> Cijena pada. Ako je zelen (negativan), trošimo zalihe -> Cijena raste.")
 else:
-    st.warning("⚠️ Ne mogu dohvatiti EIA podatke. Provjeri je li API ključ ispravno zalijepljen!")
+    st.error("⚠️ Greška s EIA podacima. Provjeri API ključ ili internet vezu.")
 
 st.markdown("---")
-st.caption("Powered by NOAA & EIA Open Data | NatGas Algo v2.0")
+st.caption("NatGas Bot V2.1 | Integrirani EIA API & NOAA Fix")
