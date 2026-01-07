@@ -5,21 +5,20 @@ import io
 from datetime import datetime, timedelta, timezone
 
 # --- KONFIGURACIJA ---
-st.set_page_config(page_title="NatGas Sniper V25", layout="wide")
+st.set_page_config(page_title="NatGas Sniper V25.1", layout="wide")
 
-# STEALTH CSS (Potpuno crna pozadina, bez okvira u boji)
+# STEALTH CSS (Crna pozadina, bez okvira u boji, visoki kontrast)
 st.markdown("""
     <style>
     .stApp { background-color: #000000; color: #FFFFFF; }
     header, [data-testid="stHeader"] { background-color: #000000 !important; }
     h2, h3 { color: #FFFFFF !important; font-weight: 800 !important; border-bottom: 1px solid #333; padding-bottom: 5px; }
-    [data-testid="stMetricValue"] { font-size: 1.5rem !important; font-weight: 800 !important; color: #FFFFFF !important; }
+    [data-testid="stMetricValue"] { font-size: 1.5rem !important; font-weight: 800 !important; }
     [data-testid="stMetricLabel"] { font-size: 0.9rem !important; color: #AAAAAA !important; }
     .stMetric { background-color: transparent; border: 1px solid #333; border-radius: 0px; padding: 10px; }
-    .summary-text { font-size: 1.1rem; line-height: 1.6; color: #FFFFFF; border: 1px solid #444; padding: 20px; margin-bottom: 30px; }
-    /* Sidebar styling */
+    .summary-text { font-size: 1.05rem; line-height: 1.6; color: #FFFFFF; border: 1px solid #444; padding: 20px; margin-bottom: 30px; }
+    .legend-text { font-size: 0.85rem; color: #BBBBBB; margin-top: 5px; font-style: italic; }
     section[data-testid="stSidebar"] { background-color: #111111; border-right: 1px solid #333; }
-    .stMarkdown p { color: #FFFFFF; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -49,7 +48,7 @@ def get_eia_data(api_key):
 
 # --- SIDEBAR: COT DATA CENTER ---
 with st.sidebar:
-    st.header("🏛️ COT DATA")
+    st.header("🏛️ COT DATA CENTER")
     nc_l = st.number_input("NC Long", value=288456)
     nc_s = st.number_input("NC Short", value=424123)
     c_l = st.number_input("Comm Long", value=512000)
@@ -67,32 +66,46 @@ nao = get_noaa_val("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.nao.cdas.z5
 pna = get_noaa_val("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.pna.cdas.z500.19500101_current.csv")
 storage = get_eia_data(EIA_API_KEY)
 
+# --- FUNKCIJA ZA GRADACIJU ---
+def get_gradation(val, index_type):
+    if index_type in ["AO", "NAO"]:
+        if val < -2.0: return "EXTREME BULLISH"
+        if val < -1.0: return "BULLISH"
+        if val < -0.4: return "MINOR BULLISH"
+        if val > 1.5: return "EXTREME BEARISH"
+        if val > 0.8: return "BEARISH"
+        if val > 0.4: return "MINOR BEARISH"
+    elif index_type == "PNA":
+        if val > 1.5: return "EXTREME BULLISH"
+        if val > 0.8: return "BULLISH"
+        if val > 0.4: return "MINOR BULLISH"
+        if val < -1.5: return "EXTREME BEARISH"
+        if val < -0.8: return "BEARISH"
+        if val < -0.4: return "MINOR BEARISH"
+    return "NEUTRAL"
+
 # --- 1. EXECUTIVE STRATEGIC SUMMARY ---
 st.subheader("📋 Executive Strategic Summary")
 
-# Logika za deskriptivni sažetak
-meteo_setup = "BULLISH" if (ao < -0.5 or nao < -0.5) else "BEARISH"
-stor_setup = "BULLISH" if (storage and storage['diff_5y'] < 0) else "BEARISH"
+meteo_bias = "BULLISH" if (ao < -0.4 or nao < -0.4) else "BEARISH"
+stor_bias = "BULLISH" if (storage and storage['diff_5y'] < 0) else "BEARISH"
 
-# Squeeze Logic
-squeeze_msg = ""
-if nc_net < -150000 and nr_net < -10000 and meteo_setup == "BULLISH":
-    squeeze_msg = "Detektiran je rizik od SHORT SQUEEZEA. Institucije i retail su u ekstremnom shortu dok atmosferski indeksi AO i NAO padaju, što sugerira da bi prva potvrda hladnoće na 12z runu mogla prisiliti medvjede na panično zatvaranje pozicija."
-elif nc_net > 100000 and nr_net > 20000 and meteo_setup == "BEARISH":
-    squeeze_msg = "Detektiran je rizik od LONG SQUEEZEA. Previše je optimizma na tržištu dok meteo radar pokazuje toplinu (Bearish), što bi moglo izazvati lančano aktiviranje stop-loss naloga prema dolje."
-else:
-    squeeze_msg = "Tržišno pozicioniranje je trenutno u ravnoteži bez ekstremnih pritisaka na jednu stranu."
+# Squeeze Analysis
+squeeze_play = "Neutralna situacija"
+if nc_net < -150000 and nr_net < -10000 and meteo_bias == "BULLISH":
+    squeeze_play = "**SHORT SQUEEZE RISK:** Institucije i mali igrači su u ekstremnim prodajnim pozicijama dok atmosfera (AO/NAO) signalizira dolazak hladnoće. Ovo je klasična zamka za 'bear' tradere gdje svaka vijest o snijegu može izazvati eksplozivan rast cijene zbog prisilnog zatvaranja shortova."
+elif nc_net > 100000 and nr_net > 20000 and meteo_bias == "BEARISH":
+    squeeze_play = "**LONG SQUEEZE RISK:** Tržište je previše 'long' dok fundamenti i toplo vrijeme ne podržavaju potražnju. Postoji visok rizik od lančanog aktiviranja stop-loss naloga prema dolje ako 12z run ne donese hladnoću."
 
 summary_desc = f"""
-Trenutna situacija na tržištu ukazuje na **{meteo_setup}** meteorološki trend (AO: {ao:.2f}, NAO: {nao:.2f}). 
-Fundamenti zaliha su **{stor_setup}** u odnosu na petogodišnji prosjek ({storage['diff_5y']:+} Bcf). 
-{squeeze_msg} 
-Preporuka je pratiti AO špagete: ako se trend strmoglavljivanja nastavi, očekuj povećanu volatilnost.
+Atmosferska situacija je trenutno **{meteo_bias}** (AO: {ao:.2f}, NAO: {nao:.2f}). 
+Zalihe plina su u statusu **{stor_bias}** s odstupanjem od {storage['diff_5y']:+} Bcf u odnosu na petogodišnji prosjek. 
+{squeeze_play} 
+Strategija: Pratiti 'špagete' AO indeksa. Ako se trend strmoglavljivanja prosječne crne linije nastavi, fundamenti će nadvladati trenutnu cijenu.
 """
-
 st.markdown(f"<div class='summary-text'>{summary_desc}</div>", unsafe_allow_html=True)
 
-# --- 2. NOAA RADAR: SHORT vs LONG TERM ---
+# --- 2. NOAA RADAR ---
 st.subheader("🗺️ NOAA Temperature Radar")
 col_r1, col_r2 = st.columns(2)
 with col_r1:
@@ -105,15 +118,24 @@ st.markdown("---")
 # --- 3. ATMOSPHERIC DRIVERS (SPAGHETTI TRENDS) ---
 st.subheader("📈 Index Forecast Trends")
 v1, v2, v3 = st.columns(3)
+
 with v1:
     st.image("https://www.cpc.ncep.noaa.gov/products/precip/CWlink/daily_ao_index/ao.sprd2.gif")
-    st.metric("AO INDEX", f"{ao:.2f}", "BULLISH" if ao < -0.5 else "BEARISH", delta_color="inverse")
+    status = get_gradation(ao, "AO")
+    st.metric("AO INDEX", f"{ao:.2f}", status, delta_color="inverse")
+    st.markdown("<div class='legend-text'>Legenda: Ako crna linija pada ispod nule to je BULLISH (hladnoća bježi na jug). Ako ide iznad je BEARISH.</div>", unsafe_allow_html=True)
+
 with v2:
     st.image("https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/nao.sprd2.gif")
-    st.metric("NAO INDEX", f"{nao:.2f}", "BULLISH" if nao < -0.5 else "BEARISH", delta_color="inverse")
+    status = get_gradation(nao, "NAO")
+    st.metric("NAO INDEX", f"{nao:.2f}", status, delta_color="inverse")
+    st.markdown("<div class='legend-text'>Legenda: Ako crna linija pada ispod nule to je BULLISH (blokada na Istoku). Ako ide iznad je BEARISH.</div>", unsafe_allow_html=True)
+
 with v3:
     st.image("https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/pna.sprd2.gif")
-    st.metric("PNA INDEX", f"{pna:.2f}", "BULLISH" if pna > 0.5 else "BEARISH")
+    status = get_gradation(pna, "PNA")
+    st.metric("PNA INDEX", f"{pna:.2f}", status, delta_color="normal")
+    st.markdown("<div class='legend-text'>Legenda: Ako crna linija ide iznad nule to je BULLISH (hladnoća u Midwestu). Ako pada ispod je BEARISH.</div>", unsafe_allow_html=True)
 
 st.markdown("---")
 
@@ -123,8 +145,8 @@ if storage:
     e1, e2, e3 = st.columns(3)
     e1.metric("ZALIHE", f"{storage['curr']} Bcf", f"{storage['chg']} Bcf")
     
-    stor_label = "BULLISH" if storage['diff_5y'] < 0 else "BEARISH"
-    e2.metric(f"vs 5y AVG ({stor_label})", f"{storage['diff_5y']:+} Bcf", delta_color="inverse")
+    stor_lbl = "BULLISH" if storage['diff_5y'] < 0 else "BEARISH"
+    e2.metric(f"vs 5y AVG ({stor_lbl})", f"{storage['diff_5y']:+} Bcf", delta_color="inverse")
     
     with e3:
         now = datetime.now(timezone.utc)
