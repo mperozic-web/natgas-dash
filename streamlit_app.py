@@ -4,41 +4,41 @@ import requests
 import io
 
 # --- KONFIGURACIJA ---
-st.set_page_config(page_title="NatGas Sniper V8.0", layout="wide")
+st.set_page_config(page_title="NatGas Sniper V8.1", layout="wide")
 
-# CSS za čišći i pregledniji UI
+# CSS za optimizaciju mobilnog prikaza i čitljivosti
 st.markdown("""
     <style>
-    [data-testid="stMetricValue"] { font-size: 1.3rem !important; font-weight: 700; }
-    [data-testid="stMetricLabel"] { font-size: 0.8rem !important; text-transform: uppercase; }
-    .stAlert { padding: 0.5rem !important; border-radius: 8px; }
-    h3 { font-size: 1.1rem !important; color: #1E1E1E; margin-bottom: 0.5rem; border-bottom: 2px solid #3498db; width: fit-content; }
+    [data-testid="stMetricValue"] { font-size: 1.2rem !important; font-weight: 700; }
+    [data-testid="stMetricLabel"] { font-size: 0.75rem !important; text-transform: uppercase; }
+    .stAlert { padding: 0.4rem !important; border-radius: 8px; }
+    h3 { font-size: 1.1rem !important; color: #1E1E1E; margin-bottom: 0.6rem; border-bottom: 2px solid #3498db; width: fit-content; }
     </style>
     """, unsafe_allow_html=True)
 
 EIA_API_KEY = "UKanfPJLVukxpG4BTdDDSH4V4cVVtSNdk0JgEgai"
 
-# --- 1. DETALJNA NOAA INTERPRETACIJA ---
+# --- 1. NOAA INTERPRETACIJA ---
 def interpret_noaa(name, val):
     val = float(val)
     res = {"status": "NEUTRALNO", "color": "off", "desc": "", "bias": "Neutral"}
     
     if name == "AO":
-        if val < -2.5: res = {"status": "EKSTREMNO BULLISH", "color": "normal", "desc": "Polarni vrtlog je potpuno razbijen. Hladnoća bježi s Arktika ravno u SAD.", "bias": "Strong Long"}
-        elif val < -1.0: res = {"status": "JAKO BULLISH", "color": "normal", "desc": "Vrtlog je nestabilan, visoka vjerojatnost hladnih prodora.", "bias": "Long"}
-        elif val > 2.5: res = {"status": "EKSTREMNO BEARISH", "color": "inverse", "desc": "Vrtlog je super-stabilan. Hladnoća je zaključana na polu. Toplo u SAD.", "bias": "Strong Short"}
-        elif val > 1.0: res = {"status": "JAKO BEARISH", "color": "inverse", "desc": "Hladnoća se ne može probiti na jug.", "bias": "Short"}
+        if val < -2.5: res = {"status": "EKSTREMNO BULLISH", "color": "normal", "desc": "Vrtlog razbijen, hladnoća bježi s Arktika u SAD.", "bias": "Strong Long"}
+        elif val < -1.0: res = {"status": "JAKO BULLISH", "color": "normal", "desc": "Vrtlog nestabilan, hladni prodori su vjerojatni.", "bias": "Long"}
+        elif val > 2.5: res = {"status": "EKSTREMNO BEARISH", "color": "inverse", "desc": "Vrtlog super-stabilan, hladnoća zaključana na polu.", "bias": "Strong Short"}
+        elif val > 1.0: res = {"status": "JAKO BEARISH", "color": "inverse", "desc": "Hladnoća se ne probija na jug.", "bias": "Short"}
     
     elif name == "NAO":
-        if val < -1.2: res = {"status": "EKSTREMNO BULLISH", "color": "normal", "desc": "Snažna blokada iznad Grenlanda gura hladnoću na Istočnu obalu SAD-a.", "bias": "Strong Long"}
-        elif val < -0.6: res = {"status": "BULLISH", "color": "normal", "desc": "Povoljna blokada za potražnju plina.", "bias": "Long"}
-        elif val > 1.2: res = {"status": "EKSTREMNO BEARISH", "color": "inverse", "desc": "Atlantik je 'otvoren', topli zrak preplavljuje SAD.", "bias": "Strong Short"}
+        if val < -1.2: res = {"status": "EKSTREMNO BULLISH", "color": "normal", "desc": "Snažna blokada iznad Grenlanda gura hladnoću na Istok SAD.", "bias": "Strong Long"}
+        elif val < -0.6: res = {"status": "BULLISH", "color": "normal", "desc": "Povoljna blokada za potražnju.", "bias": "Long"}
+        elif val > 1.2: res = {"status": "EKSTREMNO BEARISH", "color": "inverse", "desc": "Atlantik otvoren, topli zrak preplavljuje SAD.", "bias": "Strong Short"}
         elif val > 0.6: res = {"status": "BEARISH", "color": "inverse", "desc": "Brzi mlazni tokovi donose blago vrijeme.", "bias": "Short"}
 
     elif name == "PNA":
-        if val > 1.2: res = {"status": "EKSTREMNO BULLISH", "color": "normal", "desc": "Greben na zapadu gura masivnu hladnoću na istok i u središte SAD-a.", "bias": "Strong Long"}
+        if val > 1.2: res = {"status": "EKSTREMNO BULLISH", "color": "normal", "desc": "Greben na zapadu gura hladnoću u središte i na istok SAD.", "bias": "Strong Long"}
         elif val > 0.6: res = {"status": "BULLISH", "color": "normal", "desc": "Hladniji uzorak vremena.", "bias": "Long"}
-        elif val < -1.2: res = {"status": "EKSTREMNO BEARISH", "color": "inverse", "desc": "Topli pacifički zrak dominira cijelim kontinentom.", "bias": "Strong Short"}
+        elif val < -1.2: res = {"status": "EKSTREMNO BEARISH", "color": "inverse", "desc": "Topli pacifički zrak dominira kontinentom.", "bias": "Strong Short"}
         elif val < -0.6: res = {"status": "BEARISH", "color": "inverse", "desc": "Nepovoljno za grijanje.", "bias": "Short"}
 
     return res
@@ -75,7 +75,7 @@ pna = get_noaa_data("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.pna.cdas.z
 storage = get_eia_storage(EIA_API_KEY)
 
 # --- UI DISPLAY ---
-st.title("🛡️ NatGas Master Mirror V8.0")
+st.title("🛡️ Institutional Sniper Mirror V8.1")
 
 # 1. MASTER BIAS
 st.subheader("🏁 Globalni Tržišni Bias")
@@ -89,49 +89,48 @@ with b2:
 
 st.markdown("---")
 
-# 2. NOAA DETALJNA SEKCIJA
-st.subheader("📡 NOAA Meteo Intelligence (Indeksi + Interpretacija)")
-c1, c2, c3 = st.columns(3)
+# 2. PROGRESIJA TEMPERATURE (6-10 vs 8-14 dana)
+st.subheader("🗺️ Forecast Progression (6-10d vs 8-14d)")
+st.caption("Usporedba pokazuje kreće li se hladnoća prema ključnim regijama (Northeast/Midwest).")
+m_col1, m_col2 = st.columns(2)
+with m_col1:
+    st.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.new.gif", caption="6-10 Day Probability")
+with m_col2:
+    st.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", caption="8-14 Day Probability")
 
+st.markdown("---")
+
+# 3. NOAA INDEKSI & INTERPRETACIJA
+st.subheader("📡 Meteo Intelligence (Indeksi)")
+c1, c2, c3 = st.columns(3)
 def draw_noaa_card(col, name, d):
     with col:
         if d:
             st.metric(name, f"{d['val']:.2f}", d['status'], delta_color=d['color'])
-            st.info(f"**Uputa:** {d['desc']}")
-        else: st.error(f"{name} nedostupan")
-
-draw_noaa_card(c1, "AO (Polar Vortex)", ao)
+            st.caption(f"**Uputa:** {d['desc']}")
+        else: st.error(f"{name} N/A")
+draw_noaa_card(c1, "AO (Vortex)", ao)
 draw_noaa_card(c2, "NAO (Atlantic Block)", nao)
 draw_noaa_card(c3, "PNA (Pacific Pattern)", pna)
 
 st.markdown("---")
 
-# 3. NOAA VIZUALNE KARTE (PROGNOZA)
-st.subheader("🗺️ Vizualni Trend Prognoze (Gledaj kamo idu linije)")
+# 4. TRENDOVI INDEKSA (Spaghetti Plots)
+st.subheader("📈 Index Forecast Trends (14-Day)")
 v1, v2, v3 = st.columns(3)
-with v1:
-    st.image("https://www.cpc.ncep.noaa.gov/products/precip/CWlink/daily_ao_index/ao.sprd2.gif", caption="AO Forecast Trend")
-with v2:
-    st.image("https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/nao.sprd2.gif", caption="NAO Forecast Trend")
-with v3:
-    st.image("https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/pna.sprd2.gif", caption="PNA Forecast Trend")
+v1.image("https://www.cpc.ncep.noaa.gov/products/precip/CWlink/daily_ao_index/ao.sprd2.gif", caption="AO Trend")
+v2.image("https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/nao.sprd2.gif", caption="NAO Trend")
+v3.image("https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/pna.sprd2.gif", caption="PNA Trend")
 
 st.markdown("---")
 
-# 4. TEMPERATURNI OUTLOOK (8-14 DANA)
-st.subheader("❄️ NOAA 8-14 Day Temperature Probability")
-st.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", use_container_width=True)
-
-st.markdown("---")
-
-# 5. STORAGE SEKCIJA
+# 5. STORAGE & MIRROR
 st.subheader("📦 Storage Mirror (vs 5y Average)")
 if storage:
     s1, s2, s3 = st.columns(3)
-    s1.metric("Trenutne Zalihe", f"{storage['val']} Bcf", f"{storage['chg']} Bcf Tjedno")
-    s2.metric("Odstupanje od 5y Prosjeka", f"{storage['diff']:+} Bcf", delta_color="inverse")
+    s1.metric("Zalihe", f"{storage['val']} Bcf", f"{storage['chg']} Bcf")
+    s2.metric("vs 5y Average", f"{storage['diff']:+} Bcf", delta_color="inverse")
     s3.caption(f"📅 Datum izvještaja: {storage['date']}")
-else: st.error("EIA podaci nisu dostupni.")
 
 st.markdown("---")
-st.caption("NatGas Sniper V8.0 | Izvor: NOAA CPC i EIA API | Bez ručnog unosa.")
+st.caption("NatGas Sniper V8.1 | Podaci: NOAA CPC i EIA API | Trend Progression enabled.")
