@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 # --- KONFIGURACIJA ---
-st.set_page_config(page_title="NatGas Sniper V38", layout="wide")
+st.set_page_config(page_title="NatGas Sniper V39", layout="wide")
 
 # --- KONTROLA OSVJEŽAVANJA ---
 with st.sidebar:
@@ -114,26 +114,25 @@ stor_st = "BULLISH" if (storage and storage['diff_5y'] < 0) else "BEARISH"
 
 sq_msg = ""
 if nc_net < -150000 and ao_d['now'] < ao_d['y'] and meteo_st == "BULLISH":
-    sq_msg = "Kritičan **SHORT SQUEEZE** rizik. NC je ekstremno kratak dok atmosferski moment (AO) ubrzava u minus."
+    sq_msg = "Detektiran **SHORT SQUEEZE** potencijal: Institucije su u ekstremnom 'shortu' dok AO indeks ubrzava prema minusu."
 
 narrative = f"""
-NG Cijena (**${price:.3f}**) je pod utjecajem **{meteo_st}** trenda. 
-AO indeks ({ao_d['now']:.2f}) trenutačno **{'hladniji' if ao_d['now'] < ao_d['y'] else 'topliji'}** (vs yest: {ao_d['now']-ao_d['y']:+.2f}, vs week: {ao_d['now']-ao_d['w']:+.2f}). 
-Zalihe: **{stor_st}** ({storage['diff_5y']:+} Bcf vs 5y Avg). {sq_msg}
-**Strategija:** WPC karte ispod pokazuju točan pomak u prognozi. Plava boja na WPC kartama znači da modeli postaju agresivno hladniji.
+NG (**${price:.3f}**) je u **{meteo_st}** meteo fazi. 
+AO indeks ({ao_d['now']:.2f}) trenutačno **{'ubrzava' if ao_d['now'] < ao_d['y'] else 'usporava'}** (vs yest: {ao_d['now']-ao_d['y']:+.2f}, vs week: {ao_d['now']-ao_d['w']:+.2f}). 
+Zalihe su **{stor_st}** ({storage['diff_5y']:+} Bcf u odnosu na 5y prosjek). {sq_msg}
+**Zaključak:** Fokus na divergenciju između ekstremnog COT pozicioniranja i kretanja AO indeksa.
 """
 st.markdown(f"<div class='summary-narrative'>{narrative}</div>", unsafe_allow_html=True)
 
-# --- 2. WPC CHANGE MAPS (AS REQUESTED) ---
-st.subheader("🗺️ WPC 24h Temperature Change Radar")
-
+# --- 2. NOAA CPC RADAR (THE CLASSICS) ---
+st.subheader("🗺️ NOAA Temperature Radar (Strategic View)")
 c1, c2 = st.columns(2)
 with c1:
-    st.image("https://www.wpc.ncep.noaa.gov/exper/change/f024_f048_t_change.gif", caption="Promjena prognoze Day 1 -> Day 2")
-    st.image("https://www.wpc.ncep.noaa.gov/exper/change/f048_f072_t_change.gif", caption="Promjena prognoze Day 2 -> Day 3")
+    st.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.new.gif", caption="SHORT TERM (6-10 dana)")
+
 with c2:
-    st.image("https://www.wpc.ncep.noaa.gov/exper/change/f072_f096_t_change.gif", caption="Promjena prognoze Day 3 -> Day 4")
-    st.image("https://www.wpc.ncep.noaa.gov/exper/change/f096_f120_t_change.gif", caption="Promjena prognoze Day 4 -> Day 5")
+    st.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", caption="LONG TERM (8-14 dana)")
+
 
 st.markdown("---")
 
@@ -156,7 +155,7 @@ draw_idx(v2, "NAO", nao_d, nao_b, nao_c, True)
 draw_idx(v3, "PNA", pna_d, *get_color_logic(pna_d['now'], "PNA"), False)
 
 # --- 4. EIA & COT COUNTDOWN ---
-st.subheader("🛢️ Storage & Reporting")
+st.subheader("🛢️ Reporting Control")
 e1, e2 = st.columns(2)
 with e1:
     st.metric(f"EIA vs 5y AVG ({stor_st})", f"{storage['diff_5y']:+} Bcf", delta_color="inverse")
