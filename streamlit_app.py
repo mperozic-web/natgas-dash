@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 # --- KONFIGURACIJA ---
-st.set_page_config(page_title="NatGas Sniper V33", layout="wide")
+st.set_page_config(page_title="NatGas Sniper V34", layout="wide")
 
 # --- KONTROLA OSVJEŽAVANJA ---
 with st.sidebar:
@@ -16,7 +16,7 @@ with st.sidebar:
 if not pause_refresh:
     st.markdown("<head><meta http-equiv='refresh' content='120'></head>", unsafe_allow_html=True)
 
-# STEALTH CSS (Potpuno crno, bez em-dasha)
+# STEALTH CSS (Potpuno crno, visoki kontrast)
 st.markdown("""
     <style>
     .stApp { background-color: #000000; color: #FFFFFF; }
@@ -26,6 +26,8 @@ st.markdown("""
     .summary-narrative { font-size: 1.05rem; line-height: 1.7; color: #EEEEEE; border: 1px solid #444; padding: 25px; margin-bottom: 35px; background-color: #0A0A0A; }
     .legend-text { font-size: 0.85rem; color: #999999; margin-top: 5px; font-style: italic; }
     section[data-testid="stSidebar"] { background-color: #0F0F0F; border-right: 1px solid #333; }
+    /* Form button styling */
+    .stButton>button { width: 100%; background-color: #007BFF; color: white; border-radius: 5px; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -69,33 +71,37 @@ def get_eia():
         return {"curr": c, "chg": c - df.iloc[1]['val'], "diff_5y": diff, "date": df.iloc[0]['period']}
     except: return None
 
-# --- SIDEBAR: TRŽIŠTE I COT ---
+# --- SIDEBAR: LIVE PRICE & COT FORM ---
 with st.sidebar:
     st.markdown("---")
-    st.header("⚡ Live Price")
-    pr, pct = get_ng_live()
-    st.metric("Natural Gas Live", f"${pr:.3f}", f"{pct:+.2f}%")
+    st.header("⚡ Live Market")
+    price, pct = get_ng_live()
+    st.metric("Natural Gas Live", f"${price:.3f}", f"{pct:+.2f}%")
     
     st.markdown("---")
-    st.header("🏛️ COT Data Center")
-    # Vraćeni Countdown (Petak 21:30 po HR vremenu je 20:30 UTC)
-    st.info(f"⌛ COT Countdown: {get_countdown(4, 20, 30)}")
-    
-    nc_l = st.number_input("NC Long", value=288456, key="nc_l_p")
-    nc_s = st.number_input("NC Short", value=424123, key="nc_s_p")
-    c_l = st.number_input("Comm Long", value=512000, key="c_l_p")
-    c_s = st.number_input("Comm Short", value=380000, key="c_s_p")
-    nr_l = st.number_input("Retail Long", value=54120, key="nr_l_p")
-    nr_s = st.number_input("Retail Short", value=32100, key="nr_s_p")
+    # KORIŠTENJE FORME ZA COT UNOS (Potvrda osvježava sve)
+    with st.form("cot_form"):
+        st.header("🏛️ COT Data Center")
+        st.info(f"⌛ COT Countdown: {get_countdown(4, 20, 30)}")
+        
+        nc_l = st.number_input("NC Long", value=288456, key="nc_l_f")
+        nc_s = st.number_input("NC Short", value=424123, key="nc_s_f")
+        c_l = st.number_input("Comm Long", value=512000, key="c_l_f")
+        c_s = st.number_input("Comm Short", value=380000, key="c_s_f")
+        nr_l = st.number_input("Retail Long", value=54120, key="nr_l_f")
+        nr_s = st.number_input("Retail Short", value=32100, key="nr_s_f")
+        
+        # GUMB ZA POTVRDU
+        submitted = st.form_submit_button("POTVRDI I ANALIZIRAJ")
     
     st.markdown("---")
     st.header("📉 Futures Curve")
-    f1 = st.number_input("M1 (Spot):", value=pr if pr > 0 else 2.50)
+    f1 = st.number_input("M1 (Spot):", value=price if price > 0 else 2.50)
     f2 = st.number_input("M2 (Forward):", value=2.65)
     spread = f1 - f2
     st.write(f"Struktura: **{'BACKWARDATION' if spread > 0 else 'CONTANGO'}**")
 
-# --- ANALIZA ---
+# --- ANALIZA PODATAKA ---
 ao_d = get_noaa_h("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.ao.cdas.z1000.19500101_current.csv")
 nao_d = get_noaa_h("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.nao.cdas.z500.19500101_current.csv")
 pna_d = get_noaa_h("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.pna.cdas.z500.19500101_current.csv")
@@ -114,32 +120,45 @@ def get_logic(val, yest, week, itype):
 ao_b, ao_c, ao_m = get_logic(ao_d['now'], ao_d['y'], ao_d['w'], "AO")
 nao_b, nao_c, nao_m = get_logic(nao_d['now'], nao_d['y'], nao_d['w'], "NAO")
 
-# --- 1. EXECUTIVE STRATEGIC NARRATIVE ---
+# --- 1. EXECUTIVE STRATEGIC NARRATIVE (SINTEZA SVIH PODATAKA) ---
 st.subheader("📋 Executive Strategic Narrative")
+
+# Preračunavanje Net pozicija
 nc_net = nc_l - nc_s
+comm_net = c_l - c_s
 nr_net = nr_l - nr_s
+
+# Meteo & Fundament Status
 meteo_st = "BULLISH" if (ao_b == "BULLISH" or nao_b == "BULLISH") else "BEARISH"
 stor_st = "BULLISH" if (storage and storage['diff_5y'] < 0) else "BEARISH"
 
-sq_msg = ""
-if nc_net < -150000 and ao_m == "ubrzava" and meteo_st == "BULLISH":
-    sq_msg = "Detektiran je **SHORT SQUEEZE** moment. Institucije su u ekstremnom shortu, a AO moment ubrzava hladnoću."
-elif nc_net > 100000 and ao_m == "usporava":
-    sq_msg = "Rizik od **LONG SQUEEZEA**. Tržište je zasićeno kupcima uz slabljenje pritiska."
+# SQUEEZE LOGIKA (NC + NR vs Comm)
+squeeze_type = "NEUTRALNO"
+if nc_net < -150000 and nr_net < -10000 and ao_m == "ubrzava":
+    squeeze_type = "SHORT SQUEEZE"
+elif nc_net > 100000 and nr_net > 15000 and ao_m == "usporava":
+    squeeze_type = "LONG SQUEEZE"
 
-narr = f"""
-Atmosfera je u statusu **{ao_b}**. AO ({ao_d['now']:.2f}) trenutačno **{ao_m}** (vs jučer: {ao_d['now']-ao_d['y']:+.2f}). 
-Zalihe plina su **{stor_st}** ({storage['diff_5y']:+} Bcf vs 5y Avg). 
-{sq_msg} 
-Strategija: Fokus na špageti trendove. Ako crna linija nastavlja padati, fundamenti će nadvladati trenutnu cijenu.
+# DESKRIPTIVNA SINTEZA
+narrative_msg = f"""
+Trenutna cijena od **${price:.3f} ({pct:+.2f}%)** operira u okruženju **{meteo_st}** meteo trenda. 
+AO indeks ({ao_d['now']:.2f}) **{ao_m}** (vs jučer: {ao_d['now']-ao_d['y']:+.2f}), što sugerira {'jačanje' if ao_m == 'ubrzava' else 'slabljenje'} pritiska hladnoće.
+
+Zalihe su u **{stor_st}** statusu ({storage['diff_5y']:+} Bcf u odnosu na 5y prosjek). 
+Tržišno pozicioniranje (COT) ukazuje na **{squeeze_type}** rizik: 
+{'Institucije i retail su ekstremno "short" dok atmosfera ubrzava, što je klasična postavka za nasilni rast' if squeeze_type == "SHORT SQUEEZE" else 'Tržište je pretrpano kupcima dok atmosferski moment gubi snagu' if squeeze_type == "LONG SQUEEZE" else 'Nema ekstremnih divergencija u pozicioniranju'}.
+
+**Zaključak:** {'Fokus na Long ulaze' if (meteo_st == "BULLISH" and stor_st == "BULLISH") else 'Oprez s Long pozicijama'}. 
+Struktura futures krivulje (**{'BACKWARDATION' if spread > 0 else 'CONTANGO'}**) dodatno {'potvrđuje' if (spread > 0 and meteo_st == "BULLISH") else 'kontradiktira'} meteo očekivanjima.
 """
-st.markdown(f"<div class='summary-narrative'>{narr}</div>", unsafe_allow_html=True)
+
+st.markdown(f"<div class='summary-narrative'>{narrative_msg}</div>", unsafe_allow_html=True)
 
 # --- 2. NOAA RADAR ---
 st.subheader("🗺️ NOAA Temperature Radar")
 c1, c2 = st.columns(2)
-c1.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.new.gif", caption="SHORT TERM")
-c2.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", caption="LONG TERM")
+c1.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.new.gif", caption="SHORT TERM (6-10 dana)")
+c2.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", caption="LONG TERM (8-14 dana)")
 
 st.markdown("---")
 
@@ -152,15 +171,19 @@ def draw_metric(col, title, d, bias, color, inv):
         st.image(f"https://www.cpc.ncep.noaa.gov/products/precip/CWlink/daily_ao_index/{title.lower()}.sprd2.gif" if title=="AO" else f"https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/{title.lower()}.sprd2.gif")
         st.markdown(f"**{title} INDEX**")
         st.markdown(f"<span style='font-size:1.8rem; font-weight:800;'>{d['now']:.2f}</span>", unsafe_allow_html=True)
+        # Fix boja: Bullish je uvijek zeleno, Bearish je uvijek crveno
         st.markdown(f"<span style='color:{color}; font-weight:bold; border:1px solid {color}; padding:2px 8px;'>{bias}</span>", unsafe_allow_html=True)
-        y_d, w_d = d['now']-d['y'], d['now']-d['w']
-        y_col = "#00FF00" if (y_d < 0 if inv else y_d > 0) else "#FF4B4B"
-        st.markdown(f"<div style='font-size:0.85rem; margin-top:8px;'><span style='color:{y_col}'>vs yest: {y_d:+.2f}</span> | vs week: {w_d:+.2f}</div>", unsafe_allow_html=True)
+        
+        y_diff, w_diff = d['now']-d['y'], d['now']-d['w']
+        y_col = "#00FF00" if (y_diff < 0 if inv else y_diff > 0) else "#FF4B4B"
+        st.markdown(f"<div style='font-size:0.85rem; margin-top:8px;'><span style='color:{y_col}'>vs yest: {y_diff:+.2f}</span> | vs week: {w_diff:+.2f}</div>", unsafe_allow_html=True)
         st.markdown(f"<div class='legend-text'>Crna linija {'ispod' if inv else 'iznad'} nule = BULLISH.</div>", unsafe_allow_html=True)
 
 draw_metric(v1, "AO", ao_d, ao_b, ao_c, True)
 draw_metric(v2, "NAO", nao_d, nao_b, nao_c, True)
 draw_metric(v3, "PNA", pna_d, *get_logic(pna_d['now'], pna_d['y'], pna_d['w'], "PNA")[:2], False)
+
+st.markdown("---")
 
 # --- 4. EIA STORAGE ---
 st.subheader("🛢️ EIA Storage Intelligence")
@@ -169,4 +192,5 @@ if storage:
     e1.metric("ZALIHE", f"{storage['curr']} Bcf", f"{storage['chg']} Bcf")
     st_label = "BULLISH" if storage['diff_5y'] < 0 else "BEARISH"
     e2.metric(f"vs 5y AVG ({st_label})", f"{storage['diff_5y']:+} Bcf", delta_color="inverse")
-    e3.info(f"⌛ EIA Countdown: {get_countdown(3, 15, 30)}")
+    with e3:
+        st.write(f"⌛ EIA Countdown: {get_countdown(3, 15, 30)}")
