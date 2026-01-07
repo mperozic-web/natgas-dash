@@ -4,22 +4,67 @@ import requests
 import io
 
 # --- KONFIGURACIJA ---
-st.set_page_config(page_title="NatGas Sniper V5.3", layout="wide", page_icon="📈")
+st.set_page_config(page_title="NatGas Sniper V6.0", layout="wide")
+
+# CSS za moderniji i sitniji UI
+st.markdown("""
+    <style>
+    [data-testid="stMetricValue"] { font-size: 1.5rem !important; }
+    [data-testid="stMetricLabel"] { font-size: 0.8rem !important; }
+    .stAlert { padding: 0.5rem !important; }
+    h3 { font-size: 1.2rem !important; margin-bottom: 0.5rem !important; }
+    </style>
+    """, unsafe_allow_stdio=True)
+
 EIA_API_KEY = "UKanfPJLVukxpG4BTdDDSH4V4cVVtSNdk0JgEgai"
 
-# --- 1. NOAA METEO LOGIKA ---
+# --- 1. NOAA LOGIKA S GRADACIJOM ---
 def get_noaa_indices(url, name):
     try:
         r = requests.get(url, timeout=10)
         df = pd.read_csv(io.StringIO(r.content.decode('utf-8')))
         lt = df.iloc[-1]
         val = float(lt[[c for c in df.columns if any(x in c.lower() for x in ['index', 'ao', 'nao', 'pna'])][0]])
-        status = "BULLISH" if (name in ["AO", "NAO"] and val < -0.5) or (name == "PNA" and val > 0.5) else "BEARISH" if (name in ["AO", "NAO"] and val > 0.5) or (name == "PNA" and val < -0.5) else "NEUTRAL"
-        color = "normal" if status == "BULLISH" else "inverse" if status == "BEARISH" else "off"
-        return {"val": val, "status": status, "color": color}
+        
+        status, color, bias = "NEUTRAL", "off", "Neutral"
+        if name == "AO":
+            if val < -2.5: status, color, bias = "EKSTREMNO BULLISH", "normal", "Long"
+            elif val < -1.2: status, color, bias = "JAKO BULLISH", "normal", "Long"
+            elif val < -0.5: status, color, bias = "BULLISH", "normal", "Long"
+            elif val > 2.5: status, color, bias = "EKSTREMNO BEARISH", "inverse", "Short"
+            elif val > 1.2: status, color, bias = "JAKO BEARISH", "inverse", "Short"
+            elif val > 0.5: status, color, bias = "BEARISH", "inverse", "Short"
+        elif name == "NAO":
+            if val < -1.2: status, color, bias = "JAKO BULLISH", "normal", "Long"
+            elif val < -0.5: status, color, bias = "BULLISH", "normal", "Long"
+            elif val > 1.2: status, color, bias = "JAKO BEARISH", "inverse", "Short"
+            elif val > 0.5: status, color, bias = "BEARISH", "inverse", "Short"
+        elif name == "PNA":
+            if val > 1.2: status, color, bias = "JAKO BULLISH", "normal", "Long"
+            elif val > 0.5: status, color, bias = "BULLISH", "normal", "Long"
+            elif val < -1.2: status, color, bias = "JAKO BEARISH", "inverse", "Short"
+            elif val < -0.5: status, color, bias = "BEARISH", "inverse", "Short"
+            
+        return {"val": val, "status": status, "color": color, "bias": bias}
     except: return None
 
-# --- 2. EIA STORAGE ---
+# --- 2. EIA FUNDAMENTALS (SUPPLY/DEMAND) ---
+def get_eia_fundamentals(api_key):
+    try:
+        url = "https://api.eia.gov/v2/natural-gas/sum/lsum/data/"
+        params = {
+            "api_key": api_key, "frequency": "monthly", "data[0]": "value",
+            "facets[series][]": ["N9010US2", "N9070US2"],
+            "sort[0][column]": "period", "sort[0][direction]": "desc", "length": 10
+        }
+        r = requests.get(url, params=params, timeout=10).json()
+        df = pd.DataFrame(r['response']['data'])
+        prod = df[df['series'] == "N9010US2"].iloc[0]['value'] / 30
+        cons = df[df['series'] == "N9070US2"].iloc[0]['value'] / 30
+        return {"prod": prod, "cons": cons, "balance": prod - cons}
+    except: return None
+
+# --- 3. EIA STORAGE ---
 def get_eia_storage(api_key):
     try:
         url = "https://api.eia.gov/v2/natural-gas/stor/wkly/data/"
@@ -38,82 +83,76 @@ ao = get_noaa_indices("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.ao.cdas.
 nao = get_noaa_indices("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.nao.cdas.z500.19500101_current.csv", "NAO")
 pna = get_noaa_indices("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.pna.cdas.z500.19500101_current.csv", "PNA")
 storage = get_eia_storage(EIA_API_KEY)
+funds = get_eia_fundamentals(EIA_API_KEY)
 
-# --- DASHBOARD LAYOUT ---
-st.title("🛡️ NatGas Fundamental Sniper V5.3")
+# --- SUČELJE ---
 
-# SIDEBAR: CELSIUS INPUT
-with st.sidebar:
-    st.header("💎 Celsius Premium Data")
-    st.markdown("Unesi podatke iz današnjeg reporta:")
-    c_gwdd_15 = st.number_input("15-Day GWDD Deviation:", value=0.0, step=0.5, help="Unesi kumulativno odstupanje za sljedećih 15 dana.")
-    c_storage_est = st.number_input("Est. Next Storage Draw (Bcf):", value=0, help="Celsiusova procjena sljedećeg EIA izvještaja.")
-    
-    st.markdown("---")
-    st.write("**Trenutni Celsius Sentiment:**")
-    if c_gwdd_15 > 10: st.success("🔥 BULLISH (Hladno)")
-    elif c_gwdd_15 < -10: st.error("❄️ BEARISH (Toplo)")
-    else: st.info("⚪ NEUTRALNO")
+# 0. PREMIUM INPUT (ODMAH NA VRHU)
+with st.container():
+    c1, c2 = st.columns(2)
+    with c1:
+        gwdd_in = st.number_input("Celsius GWDD Devijacija (15d):", value=0.0, step=0.1, format="%.1f")
+    with c2:
+        stor_in = st.number_input("Celsius Storage Est. (Bcf):", value=0)
 
-# SEKCIJA 1: MASTER BIAS
-st.subheader("🏁 Global Bias Summary")
-b1, b2, b3 = st.columns(3)
-with b1:
-    m_bias = "LONG" if (ao and ao['status'] == "BULLISH") else "SHORT" if (ao and ao['status'] == "BEARISH") else "NEUTRAL"
-    st.info(f"🌍 METEO BIAS: {m_bias}")
-with b2:
+# 1. MASTER BIAS
+st.markdown("### 🏁 Global Bias Summary")
+m1, m2, m3 = st.columns(3)
+with m1:
+    m_bias = "LONG" if (ao and ao['bias'] == "Long") else "SHORT" if (ao and ao['bias'] == "Short") else "NEUTRAL"
+    st.info(f"🌍 METEO: {m_bias}")
+with m2:
     s_bias = "BULLISH" if (storage and storage['diff_5y'] < 0) else "BEARISH"
-    st.info(f"🛢️ STORAGE BIAS: {s_bias}")
-with b3:
-    c_bias = "BULLISH" if c_gwdd_15 > 5 else "BEARISH" if c_gwdd_15 < -5 else "NEUTRAL"
-    st.info(f"💎 CELSIUS BIAS: {c_bias}")
+    st.info(f"🛢️ STORAGE: {s_bias}")
+with m3:
+    c_bias = "BULLISH" if gwdd_in > 5 else "BEARISH" if gwdd_in < -5 else "NEUTRAL"
+    st.info(f"💎 CELSIUS: {c_bias}")
 
 st.markdown("---")
 
-# SEKCIJA 2: NOAA KARTI (PROGRESIJA PROGNOZE)
-st.subheader("🗺️ NOAA Forecast Progression (Trend)")
-st.caption("Usporedba 6-10 dana vs. 8-14 dana pokazuje kuda se hladnoća pomiče.")
-m_col1, m_col2 = st.columns(2)
-with m_col1:
-    st.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.new.gif", caption="6-10 Day Outlook")
-with m_col2:
-    st.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", caption="8-14 Day Outlook")
+# 2. METEO & KARTE
+st.subheader("📡 Meteo Intelligence")
+# Karte (Manje i jedna do druge)
+k1, k2 = st.columns(2)
+k1.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.new.gif", use_column_width=True)
+k2.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", use_column_width=True)
+
+# Indeksi (Sitnije)
+i1, i2, i3 = st.columns(3)
+if ao: i1.metric("AO Index", f"{ao['val']:.2f}", ao['status'], delta_color=ao['color'])
+if nao: i2.metric("NAO Index", f"{nao['val']:.2f}", nao['status'], delta_color=nao['color'])
+if pna: i3.metric("PNA Index", f"{pna['val']:.2f}", pna['status'], delta_color=pna['color'])
 
 st.markdown("---")
 
-# SEKCIJA 3: INDEKSI I STORAGE
-c1, c2 = st.columns(2)
-with c1:
-    st.subheader("📡 Meteo Indices")
-    i1, i2, i3 = st.columns(3)
-    if ao: i1.metric("AO Index", f"{ao['val']:.2f}", ao['status'], delta_color=ao['color'])
-    if nao: i2.metric("NAO Index", f"{nao['val']:.2f}", nao['status'], delta_color=nao['color'])
-    if pna: i3.metric("PNA Index", f"{pna['val']:.2f}", pna['status'], delta_color=pna['color'])
-
-with c2:
-    st.subheader("📦 Storage Mirror (vs. 5y Avg)")
-    if storage:
-        s1, s2 = st.columns(2)
-        s1.metric("Current", f"{storage['val']} Bcf", f"{storage['chg']} Bcf")
-        s2.metric("vs 5y Average", f"{storage['diff_5y']:+} Bcf", delta_color="inverse")
+# 3. EIA FUNDAMENTALS (SUPPLY/DEMAND)
+st.subheader("🏭 Market Balance (Supply vs Demand)")
+if funds:
+    f1, f2, f3 = st.columns(3)
+    f1.metric("Proizvodnja (Supply)", f"{funds['prod']:.1f} Bcf/d")
+    f2.metric("Potrošnja (Demand)", f"{funds['cons']:.1f} Bcf/d")
+    bal_val = funds['balance']
+    bal_lbl = "SURPLUS (Bearish)" if bal_val > 0 else "DEFICIT (Bullish)"
+    f3.metric("NET BALANCE", bal_lbl, f"{bal_val:+.1f} Bcf/d", delta_color="inverse")
 
 st.markdown("---")
-# SEKCIJA 4: STRATEŠKI ZAKLJUČAK
-st.subheader("🪞 Trading Mirror & Strategy")
-if storage and ao:
-    st.markdown("### Analiza usklađenosti:")
-    
-    # Logika za preporuku
-    total_score = 0
-    if storage['diff_5y'] < 0: total_score += 1 # Storage Bullish
-    if ao['status'] == "BULLISH": total_score += 1 # Meteo Bullish
-    if c_gwdd_15 > 5: total_score += 1 # Celsius Bullish
-    
-    if total_score >= 3:
-        st.success("🚀 **HIGH CONVICTION LONG:** Svi fundamenti su usklađeni. Potražnja raste, zalihe su male.")
-    elif total_score <= 0:
-        st.error("📉 **HIGH CONVICTION SHORT:** Svi fundamenti su usklađeni za pad. Višak plina i toplo vrijeme.")
-    else:
-        st.warning("⚠️ **DIVERGENCIJA:** Signali nisu usklađeni. Budi oprezan s dugoročnim holdanjem.")
 
-st.caption("NatGas Sniper V5.3 | Data: NOAA FTP, EIA API, User Premium Input")
+# 4. STORAGE
+st.subheader("📦 Storage Mirror")
+if storage:
+    s1, s2, s3 = st.columns(3)
+    s1.metric("Trenutno", f"{storage['val']} Bcf", f"{storage['chg']} Bcf")
+    s2.metric("vs 5y Average", f"{storage['diff_5y']:+} Bcf", delta_color="inverse")
+    s3.caption(f"📅 Zadnji podatak: {storage['date']}")
+
+# 5. FINAL MIRROR
+st.markdown("---")
+st.subheader("🪞 Objektivni Zaključak")
+score = 0
+if storage and storage['diff_5y'] < 0: score += 1
+if ao and ao['bias'] == "Long": score += 1
+if gwdd_in > 5: score += 1
+
+if score >= 3: st.success("🚀 HIGH CONVICTION LONG: Svi fundamenti su usklađeni.")
+elif score == 0: st.error("📉 HIGH CONVICTION SHORT: Svi fundamenti su usklađeni.")
+else: st.warning("⚖️ NEUTRAL/DIVERGENCIJA: Pažljivo sa scalpingom.")
