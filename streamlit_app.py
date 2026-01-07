@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 # --- KONFIGURACIJA ---
-st.set_page_config(page_title="NatGas Sniper V39", layout="wide")
+st.set_page_config(page_title="NatGas Sniper V40", layout="wide")
 
 # --- KONTROLA OSVJEŽAVANJA ---
 with st.sidebar:
@@ -27,6 +27,7 @@ st.markdown("""
     .status-box { padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 0.9rem; border: 1px solid #444; }
     .bull-text { color: #00FF00 !important; border-color: #00FF00 !important; }
     .bear-text { color: #FF4B4B !important; border-color: #FF4B4B !important; }
+    .legend-text { font-size: 0.85rem; color: #999999; margin-top: 5px; font-style: italic; }
     section[data-testid="stSidebar"] { background-color: #0F0F0F; border-right: 1px solid #333; }
     .stButton>button { width: 100%; background-color: #007BFF; color: white; font-weight: bold; }
     </style>
@@ -61,8 +62,9 @@ def get_eia():
         df = pd.DataFrame(r['response']['data'])
         df['val'] = df['value'].astype(int)
         c = df.iloc[0]['val']
+        p = df.iloc[1]['val']
         diff = c - int(df['val'].mean())
-        return {"curr": c, "chg": c - df.iloc[1]['val'], "diff_5y": diff, "date": df.iloc[0]['period']}
+        return {"curr": c, "prev": p, "chg": c - p, "diff_5y": diff, "date": df.iloc[0]['period']}
     except: return None
 
 # --- SIDEBAR: LIVE PRICE & COT FORM ---
@@ -114,25 +116,24 @@ stor_st = "BULLISH" if (storage and storage['diff_5y'] < 0) else "BEARISH"
 
 sq_msg = ""
 if nc_net < -150000 and ao_d['now'] < ao_d['y'] and meteo_st == "BULLISH":
-    sq_msg = "Detektiran **SHORT SQUEEZE** potencijal: Institucije su u ekstremnom 'shortu' dok AO indeks ubrzava prema minusu."
+    sq_msg = "Detektiran **SHORT SQUEEZE** rizik: NC Short pozicije su ekstremne dok AO ubrzava trend hlađenja."
 
 narrative = f"""
 NG (**${price:.3f}**) je u **{meteo_st}** meteo fazi. 
-AO indeks ({ao_d['now']:.2f}) trenutačno **{'ubrzava' if ao_d['now'] < ao_d['y'] else 'usporava'}** (vs yest: {ao_d['now']-ao_d['y']:+.2f}, vs week: {ao_d['now']-ao_d['w']:+.2f}). 
-Zalihe su **{stor_st}** ({storage['diff_5y']:+} Bcf u odnosu na 5y prosjek). {sq_msg}
-**Zaključak:** Fokus na divergenciju između ekstremnog COT pozicioniranja i kretanja AO indeksa.
+AO indeks ({ao_d['now']:.2f}) trenutačno **{'ubrzava' if ao_d['now'] < ao_d['y'] else 'usporava'}** (vs jučer: {ao_d['now']-ao_d['y']:+.2f}). 
+Zalihe: **{stor_st}** ({storage['diff_5y']:+} Bcf vs 5y Avg). 
+Zadnja promjena zaliha iznosila je **{storage['chg']:+} Bcf** (ukupno: {storage['curr']} Bcf).
+{sq_msg}
 """
 st.markdown(f"<div class='summary-narrative'>{narrative}</div>", unsafe_allow_html=True)
 
-# --- 2. NOAA CPC RADAR (THE CLASSICS) ---
-st.subheader("🗺️ NOAA Temperature Radar (Strategic View)")
+# --- 2. NOAA CPC RADAR ---
+st.subheader("🗺️ NOAA Temperature Radar")
 c1, c2 = st.columns(2)
 with c1:
     st.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.new.gif", caption="SHORT TERM (6-10 dana)")
-
 with c2:
     st.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", caption="LONG TERM (8-14 dana)")
-
 
 st.markdown("---")
 
@@ -140,7 +141,7 @@ st.markdown("---")
 st.subheader("📈 Index Forecast Trends & Momentum")
 v1, v2, v3 = st.columns(3)
 
-def draw_idx(col, title, d, b, c_class, inv):
+def draw_idx(col, title, d, b, c_class, inv, legend):
     with col:
         st.image(f"https://www.cpc.ncep.noaa.gov/products/precip/CWlink/daily_ao_index/{title.lower()}.sprd2.gif" if title=="AO" else f"https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/{title.lower()}.sprd2.gif")
         st.markdown(f"**{title} INDEX**")
@@ -149,17 +150,20 @@ def draw_idx(col, title, d, b, c_class, inv):
         y_d = d['now']-d['y']
         y_col = "#00FF00" if (y_d < 0 if inv else y_d > 0) else "#FF4B4B"
         st.markdown(f"<div style='font-size:0.85rem; margin-top:10px;'><span style='color:{y_col}'>vs yest: {y_d:+.2f}</span> | vs week: {d['now']-d['w']:+.2f}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='legend-text'>{legend}</div>", unsafe_allow_html=True)
 
-draw_idx(v1, "AO", ao_d, ao_b, ao_c, True)
-draw_idx(v2, "NAO", nao_d, nao_b, nao_c, True)
-draw_idx(v3, "PNA", pna_d, *get_color_logic(pna_d['now'], "PNA"), False)
+draw_idx(v1, "AO", ao_d, ao_b, ao_c, True, "Crna linija ISPOD 0 = BULLISH (Hladnije)")
+draw_idx(v2, "NAO", nao_d, nao_b, nao_c, True, "Crna linija ISPOD 0 = BULLISH (Hladnije)")
+draw_idx(v3, "PNA", pna_d, *get_color_logic(pna_d['now'], "PNA"), False, "Crna linija IZNAD 0 = BULLISH (Hladnije)")
 
 # --- 4. EIA & COT COUNTDOWN ---
-st.subheader("🛢️ Reporting Control")
-e1, e2 = st.columns(2)
-with e1:
-    st.metric(f"EIA vs 5y AVG ({stor_st})", f"{storage['diff_5y']:+} Bcf", delta_color="inverse")
-with e2:
+st.subheader("🛢️ Storage Reporting & Countdowns")
+e1, e2, e3 = st.columns(3)
+if storage:
+    e1.metric("Zadnje zalihe", f"{storage['curr']} Bcf", f"{storage['chg']} Bcf", delta_color="inverse")
+    e2.metric("vs 5y Average", f"{storage['diff_5y']:+} Bcf", delta_color="inverse")
+
+with e3:
     def get_cd(d, h, m):
         n = datetime.now(timezone.utc)
         t = (n + timedelta(days=(d - n.weekday()) % 7)).replace(hour=h, minute=m, second=0)
