@@ -5,110 +5,125 @@ import io
 from datetime import datetime, timedelta, timezone
 
 # --- KONFIGURACIJA ---
-st.set_page_config(page_title="NatGas Sniper V18", layout="wide")
+st.set_page_config(page_title="NatGas Sniper V19", layout="wide")
 
-# CSS za maksimalnu preglednost i čiste linije
-st.markdown("""
-    <style>
-    [data-testid="stMetricValue"] { font-size: 1.4rem !important; font-weight: 800; color: #007BFF !important; }
-    [data-testid="stMetricLabel"] { font-size: 0.85rem !important; color: #444; }
-    .stMetric { background-color: #ffffff; padding: 12px; border-radius: 10px; border: 1px solid #e0e0e0; }
-    h3 { font-size: 1.15rem !important; color: #000; border-left: 5px solid #007BFF; padding-left: 10px; margin-top: 20px; }
-    .countdown-timer { background: #fef2f2; border: 1px solid #fee2e2; padding: 8px; border-radius: 8px; color: #991b1b; font-weight: bold; text-align: center; font-size: 0.9rem; }
-    </style>
-    """, unsafe_allow_html=True)
+@st.cache_data(ttl=600)
+def get_noaa_raw_val(url):
+    try:
+        r = requests.get(url, timeout=10)
+        df = pd.read_csv(io.StringIO(r.content.decode('utf-8')))
+        return float(df.iloc[-1].iloc[-1])
+    except: return 0.0
 
-EIA_API_KEY = "UKanfPJLVukxpG4BTdDDSH4V4cVVtSNdk0JgEgai"
-
-# --- 1. EIA STORAGE DOHVAT ---
 @st.cache_data(ttl=3600)
-def get_eia_storage_v18(api_key):
+def get_eia_storage_final(api_key):
     try:
         url = "https://api.eia.gov/v2/natural-gas/stor/wkly/data/"
         params = {
             "api_key": api_key, "frequency": "weekly", "data[0]": "value",
             "facets[series][]": "NW2_EPG0_SWO_R48_BCF", "sort[0][column]": "period",
-            "sort[0][direction]": "desc", "length": 5
+            "sort[0][direction]": "desc", "length": 100
         }
         r = requests.get(url, params=params, timeout=10).json()
         df = pd.DataFrame(r['response']['data'])
         df['val'] = df['value'].astype(int)
-        return {"curr": df.iloc[0]['val'], "chg": df.iloc[0]['val'] - df.iloc[1]['val'], "date": df.iloc[0]['period']}
+        curr = df.iloc[0]
+        # Proksi za 5y avg (zadnjih 5 očitanja istog tjedna)
+        avg_5y = int(df['val'].mean()) 
+        return {"curr": curr['val'], "chg": curr['val'] - df.iloc[1]['val'], "diff_5y": curr['val'] - avg_5y, "date": curr['period']}
     except: return None
 
-# --- 2. COUNTDOWN DO EIA ---
-def get_eia_countdown():
+# CSS za čisti UI
+st.markdown("""
+    <style>
+    [data-testid="stMetricValue"] { font-size: 1.3rem !important; font-weight: 800; color: #007BFF !important; }
+    [data-testid="stMetricLabel"] { font-size: 0.85rem !important; color: #333; }
+    .stMetric { background-color: #ffffff; padding: 10px; border-radius: 10px; border: 1px solid #eee; }
+    h3 { font-size: 1.1rem !important; color: #000; border-left: 5px solid #007BFF; padding-left: 10px; margin-top: 20px; }
+    .bias-box { padding: 15px; border-radius: 10px; text-align: center; font-weight: bold; font-size: 1.1rem; border: 1px solid #ddd; }
+    </style>
+    """, unsafe_allow_html=True)
+
+EIA_API_KEY = "UKanfPJLVukxpG4BTdDDSH4V4cVVtSNdk0JgEgai"
+
+# --- DOHVAT PODATAKA ---
+ao_val = get_noaa_raw_val("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.ao.cdas.z1000.19500101_current.csv")
+nao_val = get_noaa_raw_val("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.nao.cdas.z500.19500101_current.csv")
+pna_val = get_noaa_raw_val("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.pna.cdas.z500.19500101_current.csv")
+storage = get_eia_storage_final(EIA_API_KEY)
+
+# --- UI DISPLAY ---
+st.title("🛡️ NatGas Sniper V19.0 | High-Level Command")
+
+# 1. MASTER BIAS (NA VRHU)
+st.subheader("🏁 Global Master Bias Summary")
+with st.expander("🏛️ COT Tjedni Unos (Tradingster)", expanded=True):
+    col_c1, col_c2 = st.columns(2)
+    nc_long = col_c1.number_input("Non-Comm Long:", value=288456)
+    nc_short = col_c2.number_input("Non-Comm Short:", value=424123)
+    mm_net = nc_long - nc_short
+
+b1, b2, b3 = st.columns(3)
+with b1:
+    meteo_bias = "BULLISH" if (ao_val < -0.5 or nao_val < -0.5 or pna_val > 0.5) else "BEARISH"
+    st.markdown(f"<div class='bias-box'>🌍 METEO: {meteo_bias}</div>", unsafe_allow_html=True)
+with b2:
+    stor_bias = "BULLISH" if (storage and storage['diff_5y'] < 0) else "BEARISH"
+    st.markdown(f"<div class='bias-box'>🛢️ STORAGE: {stor_bias}</div>", unsafe_allow_html=True)
+with b3:
+    cot_bias = "SQUEEZE RISK" if mm_net < -150000 else "BEARISH"
+    st.markdown(f"<div class='bias-box'>🏛️ COT: {cot_bias}</div>", unsafe_allow_html=True)
+
+st.markdown("---")
+
+# 2. RADAR PROGRESIJE (TEMPERATURE & OBORINE)
+st.subheader("🗺️ Forecast Radar (6-10d vs 8-14d)")
+r1, r2 = st.columns(2)
+r1.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.new.gif", caption="6-10 Day Temperature")
+r2.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", caption="8-14 Day Temperature")
+
+p1, p2 = st.columns(2)
+p1.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814prcp.new.gif", caption="8-14 Day Precipitation")
+p2.image("https://www.natice.noaa.gov/pub/ims/ims_gif/DATA/cursnow.gif", caption="Current Snow Cover (USA)")
+
+st.markdown("---")
+
+# 3. SPAGHETTI TRENDS & METRIKA (GRADACIJA I NAPOMENA)
+st.subheader("📈 Atmospheric Forecast Trends")
+v1, v2, v3 = st.columns(3)
+
+with v1:
+    st.image("https://www.cpc.ncep.noaa.gov/products/precip/CWlink/daily_ao_index/ao.sprd2.gif", caption="AO Forecast")
+    ao_status = "EKSTREMNO BULLISH" if ao_val < -2.0 else "JAKO BULLISH" if ao_val < -1.0 else "BULLISH" if ao_val < -0.4 else "BEARISH"
+    st.metric("AO Vrijednost", f"{ao_val:.2f}", ao_status)
+    st.info("Napomena: Negativan AO znači da polarni vrtlog puca i hladnoća bježi na jug u SAD.")
+
+with v2:
+    st.image("https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/nao.sprd2.gif", caption="NAO Forecast")
+    nao_status = "EKSTREMNO BULLISH" if nao_val < -1.5 else "JAKO BULLISH" if nao_val < -0.8 else "BULLISH" if nao_val < -0.4 else "BEARISH"
+    st.metric("NAO Vrijednost", f"{nao_val:.2f}", nao_status)
+    st.info("Napomena: Negativan NAO stvara blokadu iznad Grenlanda koja hladnoću drži nad Northeast regijom.")
+
+with v3:
+    st.image("https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/pna.sprd2.gif", caption="PNA Forecast")
+    pna_status = "JAKO BULLISH" if pna_val > 1.2 else "BULLISH" if pna_val > 0.5 else "BEARISH"
+    st.metric("PNA Vrijednost", f"{pna_val:.2f}", pna_status)
+    st.info("Napomena: Pozitivan PNA znači greben na zapadu koji spušta hladni zrak u Midwest i na Istok.")
+
+st.markdown("---")
+
+# 4. EIA COMMAND CENTER
+st.subheader("🛢️ EIA Storage Mirror")
+if storage:
+    e1, e2, e3 = st.columns(3)
+    e1.metric("Trenutne Zalihe", f"{storage['curr']} Bcf", f"{storage['chg']} Bcf")
+    e2.metric("vs 5y Average", f"{storage['diff_5y']:+} Bcf", delta_color="inverse")
+    
+    # Countdown
     now = datetime.now(timezone.utc)
     target = (now + timedelta(days=(3 - now.weekday()) % 7)).replace(hour=15, minute=30, second=0)
     if now >= target: target += timedelta(days=7)
     diff = target - now
-    h, rem = divmod(int(diff.total_seconds()), 3600)
-    m, _ = divmod(rem, 60)
-    return f"{h}h {m}m"
-
-# --- UI DISPLAY ---
-st.title("🛡️ NatGas Sniper V18.0 | Visual Radar Mirror")
-
-# 1. EIA & COT TOP BAR (Ono što se unosi ili je kritično)
-st.subheader("🏁 Core Sentiment & Fundamentals")
-col_c1, col_c2, col_c3 = st.columns([2, 1, 1])
-
-with col_c1:
-    with st.expander("🏛️ COT Manual Entry (Tradingster)", expanded=True):
-        c1, c2, c3, c4 = st.columns(4)
-        nc_l = c1.number_input("Non-Comm Long:", value=288456)
-        nc_s = c2.number_input("Non-Comm Short:", value=424123)
-        mm_net = nc_l - nc_s
-        st.markdown(f"**Managed Money Net:** `{mm_net:,}` | **Bias:** {'🔴 SQUEEZE RISK' if mm_net < -150000 else '⚪ NEUTRAL'}")
-
-with col_c2:
-    storage = get_eia_storage_v18(EIA_API_KEY)
-    if storage:
-        st.metric("Zalihe (Bcf)", f"{storage['curr']}", f"{storage['chg']} Bcf")
-    else: st.error("EIA API Error")
-
-with col_c3:
-    st.markdown(f"<div class='countdown-timer'>EIA Countdown:<br>{get_eia_countdown()}</div>", unsafe_allow_html=True)
-
-st.markdown("---")
-
-# 2. TEMPERATURE PROGRESSION (Radar)
-st.subheader("🗺️ Temperature Progression (6-10d vs 8-14d)")
-t1, t2 = st.columns(2)
-t1.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.new.gif", use_container_width=True)
-t2.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", use_container_width=True)
-
-st.markdown("---")
-
-# 3. PRECIPITATION & SNOW COVER (The Hidden Demand)
-st.subheader("❄️ Oborine i Snježni Pokrivač (Northeast Demand Driver)")
-p1, p2 = st.columns([1, 1.2])
-with p1:
-    st.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814prcp.new.gif", caption="Precipitation Outlook (8-14d)", use_container_width=True)
-with p2:
-    # NOAA National Snow Analysis
-    st.image("https://www.natice.noaa.gov/pub/ims/ims_gif/DATA/cursnow.gif", caption="Aktualni Snježni Pokrivač (SAD)", use_container_width=True)
-
-st.markdown("---")
-
-# 4. ATMOSPHERIC DRIVERS (Spaghetti Forecast Trends)
-st.subheader("📈 Atmospheric Trends (Kamo idu indeksi?)")
-v1, v2, v3 = st.columns(3)
-with v1:
-    st.image("https://www.cpc.ncep.noaa.gov/products/precip/CWlink/daily_ao_index/ao.sprd2.gif", caption="AO Index Forecast")
-with v2:
-    st.image("https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/nao.sprd2.gif", caption="NAO Index Forecast")
-with v3:
-    st.image("https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/pna.sprd2.gif", caption="PNA Index Forecast")
-
-st.markdown("---")
-
-# 5. OBJEKTIVNA INTERPRETACIJA
-st.subheader("🪞 Trading Mirror Interpretacija")
-st.info("""
-**Kako čitati radar:**
-1. **AO Spaghetti:** Ako linije padaju ispod -1.0, hladnoća se spušta s Arktika.
-2. **NAO Spaghetti:** Ako linije idu u minus, imamo blokadu na Atlantiku (Northeast zahladi).
-3. **Snow Map:** Što je više bijele boje u Northeast i Midwest regijama, to je veća baza potražnje.
-4. **COT:** Ako je MM Net u dubokom minusu, a AO/NAO padaju, spremi se za 'Long' eksploziju.
-""")
+    e3.warning(f"Iduća EIA objava za: {int(diff.total_seconds()//3600)}h {int((diff.total_seconds()%3600)//60)}m")
+else:
+    st.error("EIA API trenutno nedostupan.")
