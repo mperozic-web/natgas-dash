@@ -4,9 +4,9 @@ import requests
 import io
 
 # --- KONFIGURACIJA ---
-st.set_page_config(page_title="NatGas Sniper V6.0", layout="wide")
+st.set_page_config(page_title="NatGas Sniper V6.1", layout="wide")
 
-# CSS za moderniji i sitniji UI
+# CSS za moderniji i sitniji UI - ISPRAVLJEN PARAMETAR
 st.markdown("""
     <style>
     [data-testid="stMetricValue"] { font-size: 1.5rem !important; }
@@ -14,7 +14,7 @@ st.markdown("""
     .stAlert { padding: 0.5rem !important; }
     h3 { font-size: 1.2rem !important; margin-bottom: 0.5rem !important; }
     </style>
-    """, unsafe_allow_stdio=True)
+    """, unsafe_allow_html=True)
 
 EIA_API_KEY = "UKanfPJLVukxpG4BTdDDSH4V4cVVtSNdk0JgEgai"
 
@@ -24,7 +24,8 @@ def get_noaa_indices(url, name):
         r = requests.get(url, timeout=10)
         df = pd.read_csv(io.StringIO(r.content.decode('utf-8')))
         lt = df.iloc[-1]
-        val = float(lt[[c for c in df.columns if any(x in c.lower() for x in ['index', 'ao', 'nao', 'pna'])][0]])
+        val_col = [c for c in df.columns if any(x in c.lower() for x in ['index', 'ao', 'nao', 'pna'])][0]
+        val = float(lt[val_col])
         
         status, color, bias = "NEUTRAL", "off", "Neutral"
         if name == "AO":
@@ -55,13 +56,19 @@ def get_eia_fundamentals(api_key):
         params = {
             "api_key": api_key, "frequency": "monthly", "data[0]": "value",
             "facets[series][]": ["N9010US2", "N9070US2"],
-            "sort[0][column]": "period", "sort[0][direction]": "desc", "length": 10
+            "sort[0][column]": "period", "sort[0][direction]": "desc", "length": 20
         }
         r = requests.get(url, params=params, timeout=10).json()
         df = pd.DataFrame(r['response']['data'])
-        prod = df[df['series'] == "N9010US2"].iloc[0]['value'] / 30
-        cons = df[df['series'] == "N9070US2"].iloc[0]['value'] / 30
-        return {"prod": prod, "cons": cons, "balance": prod - cons}
+        # Izdvajanje zadnjih dostupnih vrijednosti
+        prod_data = df[df['series'] == "N9010US2"]
+        cons_data = df[df['series'] == "N9070US2"]
+        
+        if not prod_data.empty and not cons_data.empty:
+            prod = prod_data.iloc[0]['value'] / 30
+            cons = cons_data.iloc[0]['value'] / 30
+            return {"prod": prod, "cons": cons, "balance": prod - cons}
+        return None
     except: return None
 
 # --- 3. EIA STORAGE ---
@@ -72,10 +79,11 @@ def get_eia_storage(api_key):
         r = requests.get(url, params=params, timeout=10).json()
         df = pd.DataFrame(r['response']['data'])
         df['value'] = df['value'].astype(int)
-        df['week'] = pd.to_datetime(df['period']).dt.isocalendar().week
+        df['period_dt'] = pd.to_datetime(df['period'])
+        df['week'] = df['period_dt'].dt.isocalendar().week
         curr = df.iloc[0]
         avg_5y = int(df.iloc[52:][df.iloc[52:]['week'] == curr['week']].head(5)['value'].mean())
-        return {"val": curr['value'], "chg": curr['value'] - df.iloc[1]['value'], "diff_5y": curr['value'] - avg_5y, "date": pd.to_datetime(curr['period']).strftime("%d.%m.%Y")}
+        return {"val": curr['value'], "chg": curr['value'] - df.iloc[1]['value'], "diff_5y": curr['value'] - avg_5y, "date": curr['period_dt'].strftime("%d.%m.%Y")}
     except: return None
 
 # --- DOHVAT PODATAKA ---
@@ -87,13 +95,13 @@ funds = get_eia_fundamentals(EIA_API_KEY)
 
 # --- SUČELJE ---
 
-# 0. PREMIUM INPUT (ODMAH NA VRHU)
-with st.container():
-    c1, c2 = st.columns(2)
-    with c1:
-        gwdd_in = st.number_input("Celsius GWDD Devijacija (15d):", value=0.0, step=0.1, format="%.1f")
-    with c2:
-        stor_in = st.number_input("Celsius Storage Est. (Bcf):", value=0)
+# 0. PREMIUM INPUT
+st.subheader("🔑 Osobni Parametri (Celsius)")
+c1, c2 = st.columns(2)
+with c1:
+    gwdd_in = st.number_input("Celsius GWDD Devijacija (15d):", value=0.0, step=0.1, format="%.1f")
+with c2:
+    stor_in = st.number_input("Celsius Storage Est. (Bcf):", value=0)
 
 # 1. MASTER BIAS
 st.markdown("### 🏁 Global Bias Summary")
@@ -112,12 +120,10 @@ st.markdown("---")
 
 # 2. METEO & KARTE
 st.subheader("📡 Meteo Intelligence")
-# Karte (Manje i jedna do druge)
 k1, k2 = st.columns(2)
-k1.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.new.gif", use_column_width=True)
-k2.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", use_column_width=True)
+k1.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.new.gif", use_container_width=True)
+k2.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", use_container_width=True)
 
-# Indeksi (Sitnije)
 i1, i2, i3 = st.columns(3)
 if ao: i1.metric("AO Index", f"{ao['val']:.2f}", ao['status'], delta_color=ao['color'])
 if nao: i2.metric("NAO Index", f"{nao['val']:.2f}", nao['status'], delta_color=nao['color'])
@@ -125,7 +131,7 @@ if pna: i3.metric("PNA Index", f"{pna['val']:.2f}", pna['status'], delta_color=p
 
 st.markdown("---")
 
-# 3. EIA FUNDAMENTALS (SUPPLY/DEMAND)
+# 3. EIA FUNDAMENTALS
 st.subheader("🏭 Market Balance (Supply vs Demand)")
 if funds:
     f1, f2, f3 = st.columns(3)
@@ -134,6 +140,8 @@ if funds:
     bal_val = funds['balance']
     bal_lbl = "SURPLUS (Bearish)" if bal_val > 0 else "DEFICIT (Bullish)"
     f3.metric("NET BALANCE", bal_lbl, f"{bal_val:+.1f} Bcf/d", delta_color="inverse")
+else:
+    st.warning("EIA Fundamentals trenutno nedostupni.")
 
 st.markdown("---")
 
@@ -155,4 +163,4 @@ if gwdd_in > 5: score += 1
 
 if score >= 3: st.success("🚀 HIGH CONVICTION LONG: Svi fundamenti su usklađeni.")
 elif score == 0: st.error("📉 HIGH CONVICTION SHORT: Svi fundamenti su usklađeni.")
-else: st.warning("⚖️ NEUTRAL/DIVERGENCIJA: Pažljivo sa scalpingom.")
+else: st.warning("⚖️ NEUTRAL/DIVERGENCIJA: Signali nisu unificirani.")
