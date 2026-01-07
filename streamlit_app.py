@@ -5,15 +5,15 @@ import io
 from datetime import datetime, timedelta, timezone
 
 # --- KONFIGURACIJA ---
-st.set_page_config(page_title="NatGas Sniper V27", layout="wide")
+st.set_page_config(page_title="NatGas Sniper V28", layout="wide")
 
-# STEALTH CSS (Crna pozadina, maksimalni kontrast, čitljivost)
+# STEALTH CSS (Crna pozadina, maksimalni kontrast)
 st.markdown("""
     <style>
     .stApp { background-color: #000000; color: #FFFFFF; }
     header, [data-testid="stHeader"] { background-color: #000000 !important; }
     h2, h3 { color: #FFFFFF !important; font-weight: 800 !important; border-bottom: 1px solid #333; padding-bottom: 8px; }
-    [data-testid="stMetricValue"] { font-size: 1.6rem !important; font-weight: 800 !important; color: #FFFFFF !important; }
+    [data-testid="stMetricValue"] { font-size: 1.6rem !important; font-weight: 800 !important; }
     [data-testid="stMetricLabel"] { font-size: 0.95rem !important; color: #AAAAAA !important; }
     .stMetric { background-color: transparent; border: 1px solid #333; border-radius: 0px; padding: 12px; }
     .summary-narrative { font-size: 1.1rem; line-height: 1.7; color: #EEEEEE; border: 1px solid #444; padding: 25px; margin-bottom: 35px; background-color: #0A0A0A; }
@@ -34,9 +34,9 @@ def get_noaa_with_history(url):
         latest = float(df.iloc[-1][val_col])
         yesterday = float(df.iloc[-2][val_col])
         last_week = float(df.iloc[-8][val_col])
-        return {"latest": latest, "vs_y": latest - yesterday, "vs_w": latest - last_week}
+        return {"latest": latest, "vs_y": latest - yesterday, "vs_w": latest - last_week, "y_val": yesterday, "w_val": last_week}
     except:
-        return {"latest": 0.0, "vs_y": 0.0, "vs_w": 0.0}
+        return {"latest": 0.0, "vs_y": 0.0, "vs_w": 0.0, "y_val": 0.0, "w_val": 0.0}
 
 @st.cache_data(ttl=3600)
 def get_eia_data(api_key):
@@ -58,11 +58,9 @@ with st.sidebar:
     nc_s = st.number_input("NC Short (Managed Money)", value=424123)
     c_l = st.number_input("Comm Long (Hedgers)", value=512000)
     c_s = st.number_input("Comm Short (Hedgers)", value=380000)
-    nr_l = st.number_input("Retail Long (Non-Rept)", value=54120)
-    nr_s = st.number_input("Retail Short (Non-Rept)", value=32100)
-    
+    nr_l = st.number_input("Retail Long", value=54120)
+    nr_s = st.number_input("Retail Short", value=32100)
     nc_net = nc_l - nc_s
-    comm_net = c_l - c_s
     nr_net = nr_l - nr_s
 
 # --- DOHVAT ---
@@ -71,37 +69,42 @@ nao_d = get_noaa_with_history("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.
 pna_d = get_noaa_with_history("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.pna.cdas.z500.19500101_current.csv")
 storage = get_eia_data(EIA_API_KEY)
 
-# --- ANALITIČKA LOGIKA ZA SAŽETAK ---
-ao, nao, pna = ao_d['latest'], nao_d['latest'], pna_d['latest']
-meteo_bull = (ao < -0.4 or nao < -0.4)
-stor_bull = (storage and storage['diff_5y'] < 0)
+# --- ANALITIČKI DESKRIPTIVNI SAŽETAK ---
+ao_now, ao_y, ao_w = ao_d['latest'], ao_d['y_val'], ao_d['w_val']
+nao_now, nao_y, nao_w = nao_d['latest'], nao_d['y_val'], nao_d['w_val']
 
-# Squeeze Analysis
-squeeze_narrative = ""
-if nc_net < -150000 and nr_net < -10000 and meteo_bull:
-    squeeze_narrative = "Kritičan rizik od **SHORT SQUEEZEA**. Institucije (NC) i Retail (NR) su u ekstremnom shortu, dok AO i NAO indeksi padaju, što ukazuje na dolazak hladnoće koja će prisiliti medvjede na panično zatvaranje pozicija."
-elif nc_net > 100000 and nr_net > 20000 and not meteo_bull:
-    squeeze_narrative = "Kritičan rizik od **LONG SQUEEZEA**. Previše spekulativnog optimizma dok vremenska prognoza slabi, što može izazvati brzi pad ako 12z run ne potvrdi hladnoću."
+# Detekcija trenda indeksa
+ao_trend = "ubrzava u minus (hladnije)" if ao_now < ao_y < ao_w else "usporava pad" if ao_now < ao_y else "okreće u toplije"
+nao_trend = "jača blokadu (Northeast hladno)" if nao_now < nao_y < nao_w else "slabi blokadu"
+
+meteo_bias = "BULLISH" if (ao_now < -0.4 or nao_now < -0.4) else "BEARISH"
+stor_bias = "BULLISH" if (storage and storage['diff_5y'] < 0) else "BEARISH"
+
+# Strateška sinteza
+if nc_net < -150000 and ao_now < ao_y:
+    logic_msg = "Detektiran je snažan SHORT SQUEEZE moment.Managed Money je u ekstremnom kratkom položaju, a AO indeks aktivno pada, što znači da fundamenti počinju 'stiskati' spekulante."
+elif nc_net > 100000 and ao_now > ao_y:
+    logic_msg = "Postoji rizik od LONG SQUEEZEA. Previše je optimizma dok atmosferski moment gubi snagu i vraća se prema toplijim vrijednostima."
 else:
-    squeeze_narrative = "Tržišno pozicioniranje je trenutno u ravnoteži, bez ekstremnih nagnuća dionika."
+    logic_msg = "Tržište je u fazi konsolidacije. Čeka se jasniji smjer 12z runa."
 
-# --- 1. EXECUTIVE STRATEGIC SUMMARY ---
+# --- 1. EXECUTIVE STRATEGIC NARRATIVE ---
 st.subheader("📋 Executive Strategic Narrative")
 narrative = f"""
-Atmosferski uvjeti su trenutno **{'BULLISH' if meteo_bull else 'BEARISH'}**. AO ({ao:.2f}) i NAO ({nao:.2f}) pokazuju {'stabilnu blokadu i prodor arktičkog zraka' if meteo_bull else 'zadržavanje hladnoće na polu'}. 
-Fundamenti zaliha su **{'BULLISH' if stor_bull else 'BEARISH'}**, s odstupanjem od {storage['diff_5y']:+} Bcf u odnosu na petogodišnji prosjek. 
-{squeeze_narrative} 
-**Zaključak:** Fokusirati se na {'Long ulaze na povlačenjima' if (meteo_bull and stor_bull) else 'Short prilike ako se radar ne promijeni'}. Pratiti PNA indeks za potvrdu Midwest hladnoće.
+**Meteorološki profil:** Atmosferska situacija je **{meteo_bias}**. AO indeks ({ao_now:.2f}) trenutno **{ao_trend}** u odnosu na prošli tjedan ({ao_w:.2f}), dok NAO ({nao_now:.2f}) **{nao_trend}**. Ovo sugerira da je hladna fronta u fazi {'ekspanzije' if ao_now < ao_y else 'stagnacije'}.
+
+**Fundamentalni profil:** Zalihe su u **{stor_bias}** statusu s odstupanjem od {storage['diff_5y']:+} Bcf. Tržište ulazi u razdoblje {'povećane osjetljivosti na izvlačenje' if stor_bias == 'BULLISH' else 'relativne opskrbljenosti'}.
+
+**Sinteza i Rizik:** {logic_msg}
+Preporuka: Koristi špagete za potvrdu točnog datuma kulminacije AO indeksa. Ako se pad nastavi, 'short' pozicije su izrazito rizične.
 """
 st.markdown(f"<div class='summary-narrative'>{narrative}</div>", unsafe_allow_html=True)
 
 # --- 2. NOAA RADAR ---
 st.subheader("🗺️ NOAA Temperature Radar")
-col_r1, col_r2 = st.columns(2)
-with col_r1:
-    st.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.new.gif", caption="SHORT TERM (6-10 dana)", use_container_width=True)
-with col_r2:
-    st.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", caption="LONG TERM (8-14 dana)", use_container_width=True)
+c_r1, c_r2 = st.columns(2)
+c_r1.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.new.gif", caption="SHORT TERM (6-10 dana)")
+c_r2.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", caption="LONG TERM (8-14 dana)")
 
 st.markdown("---")
 
@@ -115,13 +118,13 @@ def get_gradation(val, itype):
         if val < -1.0: return "BULLISH"
         if val < -0.4: return "MINOR BULLISH"
         return "BEARISH" if val > 0.4 else "NEUTRAL"
-    else: # PNA
+    else:
         if val > 1.5: return "EXTREME BULLISH"
         if val > 0.8: return "BULLISH"
         if val > 0.4: return "MINOR BULLISH"
         return "BEARISH" if val < -0.4 else "NEUTRAL"
 
-def display_idx(col, title, data, itype, inv=True):
+def display_idx_module(col, title, data, itype, inv=True):
     with col:
         st.image(f"https://www.cpc.ncep.noaa.gov/products/precip/CWlink/daily_ao_index/{title.lower()}.sprd2.gif" if title=="AO" else f"https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/{title.lower()}.sprd2.gif")
         status = get_gradation(data['latest'], itype)
@@ -137,9 +140,9 @@ def display_idx(col, title, data, itype, inv=True):
             <div class='legend-text'>Crna linija ispod nule = BULLISH.</div>
         """, unsafe_allow_html=True)
 
-display_idx(v1, "AO", ao_d, "AO", True)
-display_idx(v2, "NAO", nao_d, "NAO", True)
-display_idx(v3, "PNA", pna_d, "PNA", False)
+display_idx_module(v1, "AO", ao_d, "AO", True)
+display_idx_module(v2, "NAO", nao_d, "NAO", True)
+display_idx_module(v3, "PNA", pna_d, "PNA", False)
 
 st.markdown("---")
 
@@ -149,7 +152,6 @@ if storage:
     e1, e2, e3 = st.columns(3)
     e1.metric("ZALIHE", f"{storage['curr']} Bcf", f"{storage['chg']} Bcf")
     
-    # Eksplicitno crvena/zelena ovisno o Bull/Bear
     stor_label = "BULLISH" if storage['diff_5y'] < 0 else "BEARISH"
     e2.metric(f"vs 5y AVG ({stor_label})", f"{storage['diff_5y']:+} Bcf", delta_color="inverse")
     
