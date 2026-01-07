@@ -3,9 +3,10 @@ import pandas as pd
 import requests
 import io
 import zipfile
+from datetime import datetime
 
 # --- KONFIGURACIJA ---
-st.set_page_config(page_title="NatGas Sniper V7.1", layout="wide")
+st.set_page_config(page_title="NatGas Sniper V7.2", layout="wide")
 
 st.markdown("""
     <style>
@@ -18,32 +19,45 @@ st.markdown("""
 
 EIA_API_KEY = "UKanfPJLVukxpG4BTdDDSH4V4cVVtSNdk0JgEgai"
 
-# --- 1. AUTOMATSKI COT DOHVAT (CFTC) ---
+# --- 1. AUTOMATSKI COT DOHVAT (S FALLBACK LOGIKOM) ---
 def get_automated_cot():
-    try:
-        url = "https://www.cftc.gov/sites/default/files/files/dea/history/deafut2026.zip"
-        r = requests.get(url, timeout=15)
-        if r.status_code != 200:
-            return None
-        with zipfile.ZipFile(io.BytesIO(r.content)) as z:
-            csv_name = z.namelist()[0]
-            with z.open(csv_name) as f:
-                df = pd.read_csv(f, low_memory=False)
-        
-        ticker = "NATURAL GAS - NEW YORK MERCANTILE EXCHANGE"
-        ng_data = df[df['Market_and_Exchange_Names'].str.contains(ticker, na=False, case=False)].iloc[0]
-        
-        mm_long = int(ng_data['M_Money_Positions_Long_All'])
-        mm_short = int(ng_data['M_Money_Positions_Short_All'])
-        mm_net = mm_long - mm_short
-        
-        ret_long = int(ng_data['NonRept_Positions_Long_All'])
-        ret_short = int(ng_data['NonRept_Positions_Short_All'])
-        ret_net = ret_long - ret_short
-        
-        return {"mm_net": mm_net, "ret_net": ret_net, "date": ng_data['Report_Date_as_MM_DD_YYYY']}
-    except:
-        return None
+    current_year = datetime.now().year
+    years_to_try = [current_year, current_year - 1]
+    
+    for year in years_to_try:
+        try:
+            url = f"https://www.cftc.gov/sites/default/files/files/dea/history/deafut{year}.zip"
+            r = requests.get(url, timeout=15)
+            if r.status_code == 200:
+                with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+                    csv_name = z.namelist()[0]
+                    with z.open(csv_name) as f:
+                        df = pd.read_csv(f, low_memory=False)
+                
+                ticker = "NATURAL GAS - NEW YORK MERCANTILE EXCHANGE"
+                ng_data = df[df['Market_and_Exchange_Names'].str.contains(ticker, na=False, case=False)]
+                
+                if not ng_data.empty:
+                    # Uzimamo najsvježiji podatak iz datoteke (zadnji red)
+                    latest = ng_data.iloc[0] 
+                    
+                    mm_long = int(latest['M_Money_Positions_Long_All'])
+                    mm_short = int(latest['M_Money_Positions_Short_All'])
+                    mm_net = mm_long - mm_short
+                    
+                    ret_long = int(latest['NonRept_Positions_Long_All'])
+                    ret_short = int(latest['NonRept_Positions_Short_All'])
+                    ret_net = ret_long - ret_short
+                    
+                    return {
+                        "mm_net": mm_net, 
+                        "ret_net": ret_net, 
+                        "date": latest['Report_Date_as_MM_DD_YYYY'],
+                        "year_source": year
+                    }
+        except:
+            continue
+    return None
 
 # --- 2. NOAA INDEKSI ---
 def get_noaa_indices(url, name):
@@ -56,10 +70,8 @@ def get_noaa_indices(url, name):
         
         status, color, bias = "NEUTRAL", "off", "Neutral"
         if name == "AO":
-            if val < -2.0: status, color, bias = "EKSTREMNO BULL", "normal", "Long"
-            elif val < -0.7: status, color, bias = "BULLISH", "normal", "Long"
-            elif val > 2.0: status, color, bias = "EKSTREMNO BEAR", "inverse", "Short"
-            elif val > 0.7: status, color, bias = "BEARISH", "inverse", "Short"
+            if val < -1.0: status, color, bias = "BULLISH", "normal", "Long"
+            elif val > 1.0: status, color, bias = "BEARISH", "inverse", "Short"
         elif name == "NAO":
             if val < -0.7: status, color, bias = "BULLISH", "normal", "Long"
             elif val > 0.7: status, color, bias = "BEARISH", "inverse", "Short"
@@ -70,11 +82,10 @@ def get_noaa_indices(url, name):
         return {"val": val, "status": status, "color": color, "bias": bias}
     except: return None
 
-# --- 3. EIA PODACI (FIXED SYNTAX) ---
+# --- 3. EIA PODACI ---
 def get_eia_data(api_key):
     data = {"storage": None, "balance": None}
     try:
-        # Storage
         url_s = "https://api.eia.gov/v2/natural-gas/stor/wkly/data/"
         params_s = {"api_key": api_key, "frequency": "weekly", "data[0]": "value", "facets[series][]": "NW2_EPG0_SWO_R48_BCF", "sort[0][column]": "period", "sort[0][direction]": "desc", "length": 250}
         r_s = requests.get(url_s, params=params_s, timeout=10).json()
@@ -85,17 +96,8 @@ def get_eia_data(api_key):
         avg_5y = int(df_s.iloc[52:][df_s.iloc[52:]['week'] == curr['week']].head(5)['val'].mean())
         data["storage"] = {"val": curr['val'], "chg": curr['val'] - df_s.iloc[1]['val'], "diff": curr['val'] - avg_5y, "date": pd.to_datetime(curr['period']).strftime("%d.%m.%Y")}
         
-        # Balance (Macro) - OVDJE JE BIO FIX
         url_b = "https://api.eia.gov/v2/natural-gas/sum/lsum/data/"
-        params_b = {
-            "api_key": api_key, 
-            "frequency": "monthly", 
-            "data[0]": "value", 
-            "facets[series][]": ["N9010US2", "N9070US2"], 
-            "sort[0][column]": "period", 
-            "sort[0][direction]": "desc", 
-            "length": 4
-        }
+        params_b = {"api_key": api_key, "frequency": "monthly", "data[0]": "value", "facets[series][]": ["N9010US2", "N9070US2"], "sort[0][column]": "period", "sort[0][direction]": "desc", "length": 4}
         r_b = requests.get(url_b, params=params_b, timeout=10).json()
         df_b = pd.DataFrame(r_b['response']['data'])
         p_val = df_b[df_b['series'] == "N9010US2"].iloc[0]['value'] / 30
@@ -112,7 +114,7 @@ eia = get_eia_data(EIA_API_KEY)
 cot = get_automated_cot()
 
 # --- UI DISPLAY ---
-st.title("🛡️ Institutional Sniper Mirror V7.1")
+st.title("🛡️ Institutional Sniper Mirror V7.2")
 
 # 1. TREND INPUT
 with st.container():
@@ -125,7 +127,7 @@ with st.container():
         velocity = g_today - g_yest
     with c2:
         st.caption("🚀 TREND VELOCITY")
-        v_label = "BULLISH (Hladnije)" if velocity > 0 else "BEARISH (Toplije)"
+        v_label = "BULLISH (Toplina slabi)" if velocity > 0 else "BEARISH (Toplina jača)"
         st.metric("Promjena Trenda", f"{velocity:+.1f}", v_label, delta_color="normal" if velocity > 0 else "inverse")
 
 st.markdown("---")
@@ -171,11 +173,11 @@ with col_cot:
     st.subheader("🏛️ Institutional COT (MM)")
     if cot:
         c_net = cot['mm_net']
-        st.metric("Managed Money Net", f"{c_net:,}", f"Retail: {cot['ret_net']:,}")
-        st.caption(f"📅 Izvještaj: {cot['date']}")
-        if c_net < -150000:
+        st.metric("Managed Money Net", f"{c_net:,}", f"Izvor: {cot['year_source']}. god.")
+        st.caption(f"📅 Datum izvještaja: {cot['date']} | Retail: {cot['ret_net']:,}")
+        if c_net < -140000:
             st.warning("⚠️ Managed Money ekstremni short. Squeeze risk!")
-    else: st.error("Čekam COT refresh (svaki petak).")
+    else: st.error("Dohvat COT podataka privremeno onemogućen.")
 
 with col_sto:
     st.subheader("📦 Storage & 5y Avg")
@@ -191,7 +193,7 @@ score = 0
 if eia['storage'] and eia['storage']['diff'] < 0: score += 1
 if ao and ao['bias'] == "Long": score += 1
 if velocity > 0: score += 1
-if cot and cot['mm_net'] < -150000: score += 1
+if cot and cot['mm_net'] < -140000: score += 1
 
 if score >= 4: st.success("🚀 ULTRA CONVICTION LONG: Svi sustavi usklađeni.")
 elif score == 0: st.error("📉 ULTRA CONVICTION SHORT: Fundamenti su slomljeni.")
