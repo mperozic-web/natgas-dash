@@ -5,7 +5,7 @@ import io
 import zipfile
 
 # --- KONFIGURACIJA ---
-st.set_page_config(page_title="NatGas Sniper V7.0", layout="wide")
+st.set_page_config(page_title="NatGas Sniper V7.1", layout="wide")
 
 st.markdown("""
     <style>
@@ -21,31 +21,28 @@ EIA_API_KEY = "UKanfPJLVukxpG4BTdDDSH4V4cVVtSNdk0JgEgai"
 # --- 1. AUTOMATSKI COT DOHVAT (CFTC) ---
 def get_automated_cot():
     try:
-        # CFTC URL za tekuću 2026. godinu
         url = "https://www.cftc.gov/sites/default/files/files/dea/history/deafut2026.zip"
         r = requests.get(url, timeout=15)
+        if r.status_code != 200:
+            return None
         with zipfile.ZipFile(io.BytesIO(r.content)) as z:
-            # Tražimo CSV datoteku unutar zip-a
             csv_name = z.namelist()[0]
             with z.open(csv_name) as f:
                 df = pd.read_csv(f, low_memory=False)
         
-        # Filtriranje za Natural Gas (NYMEX)
         ticker = "NATURAL GAS - NEW YORK MERCANTILE EXCHANGE"
         ng_data = df[df['Market_and_Exchange_Names'].str.contains(ticker, na=False, case=False)].iloc[0]
         
-        # Managed Money (Smart Money)
         mm_long = int(ng_data['M_Money_Positions_Long_All'])
         mm_short = int(ng_data['M_Money_Positions_Short_All'])
         mm_net = mm_long - mm_short
         
-        # Non-Reportable (Retail)
         ret_long = int(ng_data['NonRept_Positions_Long_All'])
         ret_short = int(ng_data['NonRept_Positions_Short_All'])
         ret_net = ret_long - ret_short
         
         return {"mm_net": mm_net, "ret_net": ret_net, "date": ng_data['Report_Date_as_MM_DD_YYYY']}
-    except Exception as e:
+    except:
         return None
 
 # --- 2. NOAA INDEKSI ---
@@ -73,7 +70,7 @@ def get_noaa_indices(url, name):
         return {"val": val, "status": status, "color": color, "bias": bias}
     except: return None
 
-# --- 3. EIA PODACI ---
+# --- 3. EIA PODACI (FIXED SYNTAX) ---
 def get_eia_data(api_key):
     data = {"storage": None, "balance": None}
     try:
@@ -88,9 +85,17 @@ def get_eia_data(api_key):
         avg_5y = int(df_s.iloc[52:][df_s.iloc[52:]['week'] == curr['week']].head(5)['val'].mean())
         data["storage"] = {"val": curr['val'], "chg": curr['val'] - df_s.iloc[1]['val'], "diff": curr['val'] - avg_5y, "date": pd.to_datetime(curr['period']).strftime("%d.%m.%Y")}
         
-        # Balance (Macro)
+        # Balance (Macro) - OVDJE JE BIO FIX
         url_b = "https://api.eia.gov/v2/natural-gas/sum/lsum/data/"
-        params_b = {"api_key": api_key, "frequency": "monthly", "data[0]": "value", "facets[series][]": ["N9010US2", "N9070US2"], "sort[0][column]": "period", "sort[0][direction] : desc", "length": 4}
+        params_b = {
+            "api_key": api_key, 
+            "frequency": "monthly", 
+            "data[0]": "value", 
+            "facets[series][]": ["N9010US2", "N9070US2"], 
+            "sort[0][column]": "period", 
+            "sort[0][direction]": "desc", 
+            "length": 4
+        }
         r_b = requests.get(url_b, params=params_b, timeout=10).json()
         df_b = pd.DataFrame(r_b['response']['data'])
         p_val = df_b[df_b['series'] == "N9010US2"].iloc[0]['value'] / 30
@@ -107,9 +112,9 @@ eia = get_eia_data(EIA_API_KEY)
 cot = get_automated_cot()
 
 # --- UI DISPLAY ---
-st.title("🛡️ Institutional Sniper Mirror V7.0")
+st.title("🛡️ Institutional Sniper Mirror V7.1")
 
-# 1. PREMIUM TREND INPUT (Side-by-side)
+# 1. TREND INPUT
 with st.container():
     c1, c2 = st.columns(2)
     with c1:
@@ -120,12 +125,12 @@ with st.container():
         velocity = g_today - g_yest
     with c2:
         st.caption("🚀 TREND VELOCITY")
-        v_label = "BULLISH (Toplina slabi)" if velocity > 0 else "BEARISH (Toplina jača)"
-        st.metric("Odstupanje Trenda", f"{velocity:+.1f}", v_label, delta_color="normal" if velocity > 0 else "inverse")
+        v_label = "BULLISH (Hladnije)" if velocity > 0 else "BEARISH (Toplije)"
+        st.metric("Promjena Trenda", f"{velocity:+.1f}", v_label, delta_color="normal" if velocity > 0 else "inverse")
 
 st.markdown("---")
 
-# 2. MASTER BIAS BAR
+# 2. MASTER BIAS
 m1, m2, m3, m4 = st.columns(4)
 m1.info(f"🌍 METEO: {'BULL' if (ao and ao['bias'] == 'Long') else 'BEAR'}")
 m2.info(f"🛢️ STORAGE: {'BULL' if (eia['storage'] and eia['storage']['diff'] < 0) else 'BEAR'}")
@@ -163,31 +168,31 @@ st.markdown("---")
 # 5. COT I STORAGE
 col_cot, col_sto = st.columns(2)
 with col_cot:
-    st.subheader("🏛️ Institutional COT (Managed Money)")
+    st.subheader("🏛️ Institutional COT (MM)")
     if cot:
         c_net = cot['mm_net']
-        st.metric("Net Pozicija (Managed Money)", f"{c_net:,}", f"Retail: {cot['ret_net']:,}")
-        st.caption(f"📅 Datum izvještaja: {cot['date']}")
+        st.metric("Managed Money Net", f"{c_net:,}", f"Retail: {cot['ret_net']:,}")
+        st.caption(f"📅 Izvještaj: {cot['date']}")
         if c_net < -150000:
-            st.warning("⚠️ Managed Money je u ekstremnom shortu. Rizik od short squeezea je visok!")
-    else: st.error("Dohvat COT podataka nije uspio.")
+            st.warning("⚠️ Managed Money ekstremni short. Squeeze risk!")
+    else: st.error("Čekam COT refresh (svaki petak).")
 
 with col_sto:
     st.subheader("📦 Storage & 5y Avg")
     if eia['storage']:
         s1, s2 = st.columns(2)
-        s1.metric("Inventory", f"{eia['storage']['val']} Bcf", f"{eia['storage']['chg']} Bcf")
+        s1.metric("Zalihe", f"{eia['storage']['val']} Bcf", f"{eia['storage']['chg']} Bcf")
         s2.metric("vs 5y Avg", f"{eia['storage']['diff']:+} Bcf", delta_color="inverse")
 
 # 6. TRADING MIRROR
 st.markdown("---")
-st.subheader("🪞 Objektivni Mirror Zaključak")
+st.subheader("🪞 Trading Mirror")
 score = 0
 if eia['storage'] and eia['storage']['diff'] < 0: score += 1
 if ao and ao['bias'] == "Long": score += 1
 if velocity > 0: score += 1
 if cot and cot['mm_net'] < -150000: score += 1
 
-if score >= 4: st.success("🚀 ULTRA CONVICTION LONG: Sve karte su na tvojoj strani.")
-elif score == 0: st.error("📉 ULTRA CONVICTION SHORT: Fundamenti su slomljeni, traži izlaz.")
-else: st.warning("⚖️ DIVERGENCIJA: Signali nisu unificirani. Pažljivo sa scalpingom.")
+if score >= 4: st.success("🚀 ULTRA CONVICTION LONG: Svi sustavi usklađeni.")
+elif score == 0: st.error("📉 ULTRA CONVICTION SHORT: Fundamenti su slomljeni.")
+else: st.warning("⚖️ DIVERGENCIJA: Signali nisu unificirani.")
