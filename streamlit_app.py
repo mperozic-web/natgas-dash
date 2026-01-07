@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 # --- KONFIGURACIJA ---
-st.set_page_config(page_title="NatGas Sniper V35", layout="wide")
+st.set_page_config(page_title="NatGas Sniper V36", layout="wide")
 
 # --- KONTROLA OSVJEŽAVANJA ---
 with st.sidebar:
@@ -73,12 +73,12 @@ with st.sidebar:
     st.markdown("---")
     with st.form("cot_form"):
         st.header("🏛️ COT Data Center")
-        nc_l = st.number_input("NC Long", value=288456, key="nc_l_s")
-        nc_s = st.number_input("NC Short", value=424123, key="nc_s_s")
-        c_l = st.number_input("Comm Long", value=512000, key="c_l_s")
-        c_s = st.number_input("Comm Short", value=380000, key="c_s_s")
-        nr_l = st.number_input("Retail Long", value=54120, key="nr_l_s")
-        nr_s = st.number_input("Retail Short", value=32100, key="nr_s_s")
+        nc_l = st.number_input("NC Long", value=288456)
+        nc_s = st.number_input("NC Short", value=424123)
+        c_l = st.number_input("Comm Long", value=512000)
+        c_s = st.number_input("Comm Short", value=380000)
+        nr_l = st.number_input("Retail Long", value=54120)
+        nr_s = st.number_input("Retail Short", value=32100)
         submitted = st.form_submit_button("POTVRDI I ANALIZIRAJ")
     
     st.markdown("---")
@@ -89,7 +89,7 @@ with st.sidebar:
     struct = "BACKWARDATION" if spread > 0 else "CONTANGO"
     st.write(f"Struktura: **{struct}**")
 
-# --- ANALIZA ---
+# --- DOHVAT ANALITIKE ---
 ao_d = get_noaa_h("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.ao.cdas.z1000.19500101_current.csv")
 nao_d = get_noaa_h("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.nao.cdas.z500.19500101_current.csv")
 pna_d = get_noaa_h("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.pna.cdas.z500.19500101_current.csv")
@@ -117,30 +117,31 @@ stor_st = "BULLISH" if (storage and storage['diff_5y'] < 0) else "BEARISH"
 
 sq_msg = ""
 if nc_net < -150000 and ao_m == "ubrzava" and meteo_st == "BULLISH":
-    sq_msg = "Detektiran je **SHORT SQUEEZE** moment. Managed Money i Retail su u ekstremnom shortu, dok AO i NAO ubrzano tonu u minus, što je recept za nasilni rast."
+    sq_msg = "Detektiran je **SHORT SQUEEZE** moment. Managed Money i Retail su u ekstremnom shortu, dok AO i NAO tjedni trendovi potvrđuju prodor hladnoće."
 elif nc_net > 100000 and ao_m == "usporava":
-    sq_msg = "Rizik od **LONG SQUEEZEA**. Tržište je zasićeno kupcima uz vizualno slabljenje plavih zona na radaru."
+    sq_msg = "Rizik od **LONG SQUEEZEA**. Tržište je zasićeno kupcima uz tjedni trend slabljenja potražnje."
 
 narrative = f"""
-Cijena NG (**${price:.3f}**) operira u **{meteo_st}** meteo okruženju. 
-AO indeks ({ao_d['now']:.2f}) trenutno **{ao_m}** (vs jučer: {ao_d['now']-ao_d['y']:+.2f}). 
+NG Cijena (**${price:.3f}**) je pod utjecajem **{meteo_st}** atmosferskog momenta. 
+AO indeks ({ao_d['now']:.2f}) trenutačno **{ao_m}** (vs jučer: {ao_d['now']-ao_d['y']:+.2f}, vs prošli tjedan: {ao_d['now']-ao_d['w']:+.2f}). 
 Zalihe plina su **{stor_st}** ({storage['diff_5y']:+} Bcf vs 5y Avg). 
 {sq_msg} 
-**Strateški uvid:** Usporedi 'Current Outlook' s '24h Trend' kartama. Ako su trend karte plave, prognoza postaje hladnija iz sata u sat, bez obzira na trenutnu boju Outlook karata.
+**Strateški uvid:** Gledaj 'Change' karte. Ako donji red pokazuje plavu boju, prognoza se 'kvari' na hladno iz dana u dan. To je tvoj okidač.
 """
 st.markdown(f"<div class='summary-narrative'>{narrative}</div>", unsafe_allow_html=True)
 
-# --- 2. NOAA RADAR: CURRENT vs 24H TREND ---
-st.subheader("🗺️ Temperature Radar: Current Outlook vs 24h Forecast Trend")
+# --- 2. NOAA RADAR: CURRENT vs CHANGE (FIXED URLS) ---
+st.subheader("🗺️ Temperature Radar: Forecast vs 24h Change")
+
 col1, col2 = st.columns(2)
 with col1:
     st.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.new.gif", caption="DANAŠNJI OUTLOOK (6-10 dana)")
-    # 24h Trend karta (pokazuje je li danas hladnije ili toplije nego jučer)
-    st.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.diff.new.gif", caption="24H TREND (ŠTO SE PROMIJENILO OD JUČER - 6-10d)")
+    # Ispravljeni URL-ovi za Change karte
+    st.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.diff.new.gif", caption="24H CHANGE (Je li danas hladnije nego jučer? - 6-10d)")
 
 with col2:
     st.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", caption="DANAŠNJI OUTLOOK (8-14 dana)")
-    st.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.diff.new.gif", caption="24H TREND (ŠTO SE PROMIJENILO OD JUČER - 8-14d)")
+    st.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.diff.new.gif", caption="24H CHANGE (Je li danas hladnije nego jučer? - 8-14d)")
 
 st.markdown("---")
 
@@ -153,10 +154,13 @@ def draw_metric(col, title, d, bias, color, inv):
         st.image(f"https://www.cpc.ncep.noaa.gov/products/precip/CWlink/daily_ao_index/{title.lower()}.sprd2.gif" if title=="AO" else f"https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/{title.lower()}.sprd2.gif")
         st.markdown(f"**{title} INDEX**")
         st.markdown(f"<span style='font-size:1.8rem; font-weight:800;'>{d['now']:.2f}</span>", unsafe_allow_html=True)
+        # Logika boja: Bullish = Zeleno, Bearish = Crveno
         st.markdown(f"<span style='color:{color}; font-weight:bold; border:1px solid {color}; padding:2px 8px;'>{bias}</span>", unsafe_allow_html=True)
-        y_d, w_d = d['now']-d['y'], d['now']-d['w']
-        y_col = "#00FF00" if (y_d < 0 if inv else y_d > 0) else "#FF4B4B"
-        st.markdown(f"<div style='font-size:0.85rem; margin-top:8px;'><span style='color:{y_col}'>vs yest: {y_d:+.2f}</span> | vs week: {w_d:+.2f}</div>", unsafe_allow_html=True)
+        
+        y_diff, w_diff = d['now']-d['y'], d['now']-d['w']
+        y_col = "#00FF00" if (y_diff < 0 if inv else y_diff > 0) else "#FF4B4B"
+        w_col = "#00FF00" if (w_diff < 0 if inv else w_diff > 0) else "#FF4B4B"
+        st.markdown(f"<div style='font-size:0.85rem; margin-top:8px;'><span style='color:{y_col}'>vs yest: {y_diff:+.2f}</span> | <span style='color:{w_col}'>vs week: {w_diff:+.2f}</span></div>", unsafe_allow_html=True)
         st.markdown(f"<div class='legend-text'>Crna linija {'ispod' if inv else 'iznad'} nule = BULLISH.</div>", unsafe_allow_html=True)
 
 draw_metric(v1, "AO", ao_d, ao_b, ao_c, True)
@@ -169,6 +173,7 @@ if storage:
     e1, e2, e3 = st.columns(3)
     e1.metric("ZALIHE", f"{storage['curr']} Bcf", f"{storage['chg']} Bcf")
     st_label = "BULLISH" if storage['diff_5y'] < 0 else "BEARISH"
+    # Boja: Bullish (Zelena) ako je manjak, Bearish (Crvena) ako je višak
     e2.metric(f"vs 5y AVG ({st_label})", f"{storage['diff_5y']:+} Bcf", delta_color="inverse")
     with e3:
         now = datetime.now(timezone.utc)
