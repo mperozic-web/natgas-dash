@@ -3,3 +3,4 @@ pandas
 requests
 yfinance
 pandas_ta
+nasdaq-data-link
