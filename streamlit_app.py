@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 import pytz
 
 # --- KONFIGURACIJA ---
-st.set_page_config(page_title="NatGas Sniper V69", layout="wide")
+st.set_page_config(page_title="NatGas Sniper V70", layout="wide")
 
 # CSS: Bez em-dasha, maksimalni kontrast
 st.markdown("""
@@ -35,17 +35,17 @@ def get_ng_price():
     except: return 0.0, 0.0
 
 def get_eia_storage_hardened():
-    """Povlači isključivo Lower 48 ukupne zalihe"""
     try:
-        # Dodan facet za 'R48' (Lower 48) kako ne bi vukao regije poput Pacifica
+        # Precizno ciljanje Lower 48 (R48)
         url = f"https://api.eia.gov/v2/natural-gas/stor/wkly/data/?api_key={EIA_API_KEY}&frequency=weekly&data[0]=value&facets[location][]=R48&sort[0][column]=period&sort[0][direction]=desc&length=52"
-        r = requests.get(url).json()['response']['data']
+        res = requests.get(url).json()
+        r = res['response']['data']
         curr = int(r[0]['value'])
         prev = int(r[1]['value'])
-        # 5y Average (iz zadnja 52 tjedna)
-        avg5y = sum(int(x['value']) for x in r) / len(r)
-        return {"curr": curr, "chg": curr - prev, "v5y": curr - int(avg5y)}
-    except: return None
+        # 5y Average (3317 Bcf je tvoja referentna točka za ovaj period)
+        return {"curr": curr, "chg": curr - prev, "v5y": curr - 3317}
+    except Exception as e:
+        return None
 
 def get_noaa_idx(url):
     try:
@@ -85,23 +85,26 @@ with st.sidebar:
         ret_s = c2.number_input("Retail Short", value=32100)
         st.form_submit_button("SINKRONIZIRAJ")
 
-# --- DOHVAT PODATAKA ---
+# --- DATA DOHVAT ---
 eia = get_eia_storage_hardened()
 ao = get_noaa_idx("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.ao.cdas.z1000.19500101_current.csv")
 nao = get_noaa_idx("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.nao.cdas.z500.19500101_current.csv")
 pna = get_noaa_idx("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.pna.cdas.z500.19500101_current.csv")
 
-# --- 1. EXECUTIVE SUMMARY ---
-st.subheader("📋 Executive Strategic Summary")
+# --- PRIPREMA ZA SUMMARY (SIGURNO FORMATIRANJE) ---
+eia_curr_str = f"{eia['curr']}" if eia else "N/A"
+eia_chg_str = f"{eia['chg']:+}" if eia else "N/A"
+eia_v5y_str = f"{eia['v5y']:+}" if eia else "N/A"
 mm_net = mm_l - mm_s
 com_net = com_l - com_s
-s_bias = "BULLISH" if (eia and eia['curr'] < eia['v5y'] + eia['v5y']*0.02) else "BEARISH" # Tolerancija 2%
 
+# --- 1. EXECUTIVE SUMMARY ---
+st.subheader("📋 Executive Strategic Summary")
 st.markdown(f"""
 <div class='summary-narrative'>
     Henry Hub trguje na <strong>${price:.3f}</strong>. MM Neto: <strong>{mm_net:+,}</strong> | Comm Neto: <strong>{com_net:+,}</strong>.<br>
-    Zalihe (L48): <strong>{eia['curr'] if eia else 'N/A'} Bcf</strong>. Promjena: <strong>{eia['chg'] if eia else 'N/A':+} Bcf</strong>.<br>
-    Status vs 5y Avg: <span class='{"bull-text" if eia and eia['curr'] < 3317 else "bear-text"}'>{eia['curr'] - 3317 if eia else 'N/A':+} Bcf</span>. 
+    Zalihe (L48): <strong>{eia_curr_str} Bcf</strong>. Tjedna promjena: <strong>{eia_chg_str} Bcf</strong>.<br>
+    Status vs 5y Avg: <span class='{"bull-text" if eia and eia['v5y'] < 0 else "bear-text"}'>{eia_v5y_str} Bcf</span>. 
     Atmosferski bias: {'Hladnije (BULL)' if ao < 0 else 'Toplije (BEAR)'}.
 </div>
 """, unsafe_allow_html=True)
@@ -130,20 +133,19 @@ def draw_spag(col, title, val, url, logic):
         st.markdown(f"**{title} Index: {val:.2f}** (<span class='{'bull-text' if bias == 'BULLISH' else 'bear-text'}'>{bias}</span>)", unsafe_allow_html=True)
         st.markdown(f"<div class='legend-box'>{logic}<br>Crna linija: Ispod 0 = Hladno (BULL)</div>", unsafe_allow_html=True)
 
-draw_spag(idx_c1, "AO", ao, "https://www.cpc.ncep.noaa.gov/products/precip/CWlink/daily_ao_index/ao.sprd2.gif", "Negativan AO = Hladni zrak ide na jug.")
+draw_spag(idx_c1, "AO", ao, "https://www.cpc.ncep.noaa.gov/products/precip/CWlink/daily_ao_index/ao.sprd2.gif", "Negativan AO = Arktički upad.")
 draw_spag(idx_c2, "NAO", nao, "https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/nao.sprd2.gif", "Negativan NAO = Blokada Atlantika.")
 draw_spag(idx_c3, "PNA", pna, "https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/pna.sprd2.gif", "Pozitivan PNA = Hladnoća na istoku SAD-a.")
 
-# --- 4. EIA STORAGE (RE-CALIBRATED) ---
+# --- 4. EIA STORAGE ---
 st.subheader("🛢️ EIA Storage Intelligence (Lower 48)")
 
 if eia:
     f1, f2, f3 = st.columns(3)
     f1.metric("Storage (L48)", f"{eia['curr']} Bcf", f"{eia['chg']} Bcf", delta_color="inverse")
-    # Koristimo korisnikove 5y avg podatke (3317 Bcf) za točnost
-    f2.metric("vs 5y Average (3317)", f"{eia['curr'] - 3317:+} Bcf", delta_color="inverse")
+    f2.metric("vs 5y Average", f"{eia['v5y']:+} Bcf", delta_color="inverse")
     with f3:
-        status = "BULLISH" if eia['curr'] < 3317 else "BEARISH"
+        status = "BULLISH" if eia['v5y'] < 0 else "BEARISH"
         st.markdown(f"**Sentiment:** <h2 class='{'bull-text' if status == 'BULLISH' else 'bear-text'}'>{status}</h2>", unsafe_allow_html=True)
 else:
-    st.error("EIA Fail: Provjeri API ključ ili status servera.")
+    st.error("EIA Fail: Provjeri ključ ili konekciju.")
