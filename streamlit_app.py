@@ -2,13 +2,12 @@ import streamlit as st
 import pandas as pd
 import requests
 import io
-import time
 from datetime import datetime, timedelta, timezone
 
 # --- KONFIGURACIJA ---
-st.set_page_config(page_title="NatGas Sniper V40", layout="wide")
+st.set_page_config(page_title="NatGas Sniper V47", layout="wide")
 
-# --- KONTROLA OSVJEŽAVANJA ---
+# Kontrola osvježavanja (120s)
 with st.sidebar:
     st.header("⚙️ Sustav")
     pause_refresh = st.checkbox("Pauziraj osvježavanje (Lock UI)", value=False)
@@ -16,7 +15,7 @@ with st.sidebar:
 if not pause_refresh:
     st.markdown("<head><meta http-equiv='refresh' content='120'></head>", unsafe_allow_html=True)
 
-# STEALTH CSS
+# STEALTH CSS (Maksimalan kontrast, bez okvira)
 st.markdown("""
     <style>
     .stApp { background-color: #000000; color: #FFFFFF; }
@@ -27,148 +26,123 @@ st.markdown("""
     .status-box { padding: 4px 10px; border-radius: 4px; font-weight: bold; font-size: 0.9rem; border: 1px solid #444; }
     .bull-text { color: #00FF00 !important; border-color: #00FF00 !important; }
     .bear-text { color: #FF4B4B !important; border-color: #FF4B4B !important; }
-    .legend-text { font-size: 0.85rem; color: #999999; margin-top: 5px; font-style: italic; }
     section[data-testid="stSidebar"] { background-color: #0F0F0F; border-right: 1px solid #333; }
     .stButton>button { width: 100%; background-color: #007BFF; color: white; font-weight: bold; }
     </style>
     """, unsafe_allow_html=True)
 
 EIA_API_KEY = "UKanfPJLVukxpG4BTdDDSH4V4cVVtSNdk0JgEgai"
+NASDAQ_API_KEY = "sbgqUxBu5AfRNxSGQsky"
 
 # --- DOHVAT PODATAKA ---
-def get_ng_live():
+@st.cache_data(ttl=600)
+def get_price(ticker):
     try:
-        r = requests.get("https://query1.finance.yahoo.com/v8/finance/chart/NG=F", headers={'User-Agent': 'Mozilla/5.0'})
+        r = requests.get(f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}", headers={'User-Agent': 'Mozilla/5.0'})
         m = r.json()['chart']['result'][0]['meta']
         return m['regularMarketPrice'], ((m['regularMarketPrice'] - m['previousClose']) / m['previousClose']) * 100
     except: return 0.0, 0.0
 
-@st.cache_data(ttl=600)
-def get_noaa_h(url):
-    try:
-        r = requests.get(url, timeout=10)
-        df = pd.read_csv(io.StringIO(r.content.decode('utf-8')))
-        col = df.columns[-1]
-        v = df[col].tolist()
-        return {"now": v[-1], "y": v[-2], "w": v[-8]}
-    except: return {"now": 0.0, "y": 0.0, "w": 0.0}
-
 @st.cache_data(ttl=3600)
-def get_eia():
+def get_eia_expanded():
     try:
-        url = "https://api.eia.gov/v2/natural-gas/stor/wkly/data/"
-        params = {"api_key": EIA_API_KEY, "frequency": "weekly", "data[0]": "value", "facets[series][]": "NW2_EPG0_SWO_R48_BCF", "sort[0][column]": "period", "sort[0][direction]": "desc", "length": 50}
-        r = requests.get(url, params=params).json()
-        df = pd.DataFrame(r['response']['data'])
-        df['val'] = df['value'].astype(int)
-        c = df.iloc[0]['val']
-        p = df.iloc[1]['val']
-        diff = c - int(df['val'].mean())
-        return {"curr": c, "prev": p, "chg": c - p, "diff_5y": diff, "date": df.iloc[0]['period']}
+        # 1. Zalihe (Weekly)
+        url_s = f"https://api.eia.gov/v2/natural-gas/stor/wkly/data/?api_key={EIA_API_KEY}&frequency=weekly&data[0]=value&facets[series][]=NW2_EPG0_SWO_R48_BCF&sort[0][column]=period&sort[0][direction]=desc&length=5"
+        # 2. Proizvodnja (Monthly - Dry Gas)
+        url_p = f"https://api.eia.gov/v2/natural-gas/prod/dry/data/?api_key={EIA_API_KEY}&frequency=monthly&data[0]=value&sort[0][column]=period&sort[0][direction]=desc&length=2"
+        # 3. LNG Izvoz (Monthly)
+        url_e = f"https://api.eia.gov/v2/natural-gas/move/exp/data/?api_key={EIA_API_KEY}&frequency=monthly&data[0]=value&facets[process][]=N9011US2&sort[0][column]=period&sort[0][direction]=desc&length=2"
+        
+        s_res = requests.get(url_s).json()['response']['data']
+        p_res = requests.get(url_p).json()['response']['data']
+        e_res = requests.get(url_e).json()['response']['data']
+        
+        return {
+            "stor": int(s_res[0]['value']), "stor_chg": int(s_res[0]['value']) - int(s_res[1]['value']),
+            "prod": float(p_res[0]['value']) / 30, "prod_chg": (float(p_res[0]['value']) - float(p_res[1]['value'])) / 30,
+            "lng": float(e_res[0]['value']) / 30, "lng_chg": (float(e_res[0]['value']) - float(e_res[1]['value'])) / 30
+        }
     except: return None
 
-# --- SIDEBAR: LIVE PRICE & COT FORM ---
+def fetch_rig_count():
+    try:
+        url = f"https://data.nasdaq.com/api/v3/datasets/BAKERHUGHES/RIGS_US_NATURAL_GAS.json?api_key={NASDAQ_API_KEY}&limit=2"
+        r = requests.get(url).json()
+        d = r['dataset']['data']
+        return int(d[0][1]), int(d[0][1]) - int(d[1][1])
+    except: return 0, 0
+
+# --- SIDEBAR: GLOBAL MARKET & COT FORM ---
 with st.sidebar:
-    st.markdown("---")
-    st.header("⚡ Live Market")
-    price, pct = get_ng_live()
-    st.metric("Natural Gas Live", f"${price:.3f}", f"{pct:+.2f}%")
+    st.header("🌎 Global Hubs")
+    ng_p, ng_pct = get_price("NG=F")
+    ttf_p, ttf_pct = get_price("TTF=F")
+    st.metric("Henry Hub (US)", f"${ng_p:.3f}", f"{ng_pct:+.2f}%")
+    st.metric("Dutch TTF (EU)", f"€{ttf_p:.2f}", f"{ttf_pct:+.2f}%")
     
     st.markdown("---")
     with st.form("cot_form"):
-        st.header("🏛️ COT Data Center")
-        nc_l = st.number_input("NC Long", value=288456)
-        nc_s = st.number_input("NC Short", value=424123)
-        c_l = st.number_input("Comm Long", value=512000)
-        c_s = st.number_input("Comm Short", value=380000)
-        nr_l = st.number_input("Retail Long", value=54120)
-        nr_s = st.number_input("Retail Short", value=32100)
+        st.header("🏛️ COT Intelligence")
+        nc_l = st.number_input("Managed Money Long", value=288456)
+        nc_s = st.number_input("Managed Money Short", value=424123)
         submitted = st.form_submit_button("POTVRDI I ANALIZIRAJ")
 
-    st.header("📉 Futures Curve")
-    f1 = st.number_input("M1 (Spot):", value=price if price > 0 else 2.50)
-    f2 = st.number_input("M2 (Forward):", value=2.65)
-    spread = f1 - f2
-    struct = "BACKWARDATION" if spread > 0 else "CONTANGO"
-    st.write(f"Struktura: **{struct}**")
+# --- ANALIZA PODATAKA ---
+eia = get_eia_expanded()
+rigs, rig_chg = fetch_rig_count()
+ao_url = "https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.ao.cdas.z1000.19500101_current.csv"
+ao_r = requests.get(ao_url, timeout=5)
+ao_val = pd.read_csv(io.StringIO(ao_r.content.decode('utf-8'))).iloc[-1, -1]
 
-# --- ANALIZA ---
-ao_d = get_noaa_h("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.ao.cdas.z1000.19500101_current.csv")
-nao_d = get_noaa_h("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.nao.cdas.z500.19500101_current.csv")
-pna_d = get_noaa_h("https://ftp.cpc.ncep.noaa.gov/cwlinks/norm.daily.pna.cdas.z500.19500101_current.csv")
-storage = get_eia()
-
-def get_color_logic(val, itype):
-    if itype in ["AO", "NAO"]:
-        bias = "BULLISH" if val < -0.4 else "BEARISH" if val > 0.4 else "NEUTRAL"
-    else:
-        bias = "BULLISH" if val > 0.4 else "BEARISH" if val < -0.4 else "NEUTRAL"
-    return bias, "bull-text" if bias == "BULLISH" else "bear-text" if bias == "BEARISH" else ""
-
-ao_b, ao_c = get_color_logic(ao_d['now'], "AO")
-nao_b, nao_c = get_color_logic(nao_d['now'], "NAO")
-
-# --- 1. EXECUTIVE STRATEGIC NARRATIVE ---
+# --- 1. EXECUTIVE STRATEGIC NARRATIVE (SINTEZA) ---
 st.subheader("📋 Executive Strategic Narrative")
 nc_net = nc_l - nc_s
-meteo_st = "BULLISH" if (ao_b == "BULLISH" or nao_b == "BULLISH") else "BEARISH"
-stor_st = "BULLISH" if (storage and storage['diff_5y'] < 0) else "BEARISH"
+tightness = "TIGHT" if (eia and eia['prod'] < (eia['lng'] + 80)) else "LOOSE" # 80 Bcf/d je prosječna potrošnja
 
-sq_msg = ""
-if nc_net < -150000 and ao_d['now'] < ao_d['y'] and meteo_st == "BULLISH":
-    sq_msg = "Detektiran **SHORT SQUEEZE** rizik: NC Short pozicije su ekstremne dok AO ubrzava trend hlađenja."
+# Detekcija anomalija
+supply_alert = "BULLISH" if (eia and eia['prod_chg'] < 0) else "BEARISH"
+export_alert = "BULLISH" if (eia and eia['lng_chg'] > 0) else "BEARISH"
 
 narrative = f"""
-NG (**${price:.3f}**) je u **{meteo_st}** meteo fazi. 
-AO indeks ({ao_d['now']:.2f}) trenutačno **{'ubrzava' if ao_d['now'] < ao_d['y'] else 'usporava'}** (vs jučer: {ao_d['now']-ao_d['y']:+.2f}). 
-Zalihe: **{stor_st}** ({storage['diff_5y']:+} Bcf vs 5y Avg). 
-Zadnja promjena zaliha iznosila je **{storage['chg']:+} Bcf** (ukupno: {storage['curr']} Bcf).
-{sq_msg}
+Tržišna sinteza pokazuje status **{tightness}**. 
+Dnevna proizvodnja iznosi **{eia['prod']:.1f} Bcf/d** ({eia['prod_chg']:+.1f} promjena), dok LNG izvozni pritisak iznosi **{eia['lng']:.1f} Bcf/d** ({eia['lng_chg']:+.1f} promjena). 
+
+Managed Money pozicija od **{nc_net:+,}** ugovora je u neskladu s **{supply_alert}** trendom proizvodnje. 
+Uz AO Index na **{ao_val:+.2f}**, fundamentalna podloga za cijenu od **${ng_p:.3f}** je izrazito snažna. 
+Rig Count od **{rigs}** ({rig_chg:+} tjedno) potvrđuje da proizvođači ne povećavaju ponudu unatoč globalnoj potražnji na TTF-u (pretvoreno: **${(ttf_p * 1.08 / 3.41):.2f}/MMBtu**).
 """
 st.markdown(f"<div class='summary-narrative'>{narrative}</div>", unsafe_allow_html=True)
 
-# --- 2. NOAA CPC RADAR ---
-st.subheader("🗺️ NOAA Temperature Radar")
-c1, c2 = st.columns(2)
-with c1:
-    st.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.new.gif", caption="SHORT TERM (6-10 dana)")
-with c2:
-    st.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", caption="LONG TERM (8-14 dana)")
+# --- 2. NOAA DUAL RADAR ---
+t1, t2 = st.tabs(["🌡️ Temperature Outlook", "🌧️ Precipitation Outlook"])
+with t1:
+    c1, c2 = st.columns(2)
+    c1.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610temp.new.gif", caption="6-10d Temp")
+    c2.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814temp.new.gif", caption="8-14d Temp")
+with t2:
+    p1, p2 = st.columns(2)
+    p1.image("https://www.cpc.ncep.noaa.gov/products/predictions/610day/610prcp.new.gif", caption="6-10d Precipitation")
+    p2.image("https://www.cpc.ncep.noaa.gov/products/predictions/814day/814prcp.new.gif", caption="8-14d Precipitation")
+
+# --- 3. EXPANDED EIA MODULE ---
+st.subheader("🛢️ EIA Fundamental Fortress")
+
+col1, col2, col3 = st.columns(3)
+if eia:
+    with col1:
+        st.write("**SUPPLY (Ponuda)**")
+        st.metric("Dry Production", f"{eia['prod']:.1f} Bcf/d", f"{eia['prod_chg']:+.1f} mjesečno", delta_color="inverse")
+        st.metric("US Rig Count", f"{rigs}", f"{rig_chg:+} tjedno", delta_color="inverse")
+    
+    with col2:
+        st.write("**DEMAND (Potražnja)**")
+        st.metric("Zalihe (Storage)", f"{eia['stor']} Bcf", f"{eia['stor_chg']} Bcf", delta_color="inverse")
+        st.write(f"Status zaliha: **{'BULLISH' if eia['stor_chg'] < 0 else 'BEARISH'}**")
+
+    with col3:
+        st.write("**EXPORT (Izvoz)**")
+        st.metric("LNG Gross Exports", f"{eia['lng']:.1f} Bcf/d", f"{eia['lng_chg']:+.1f} mjesečno")
+        st.write(f"Export Pull: **{'SNAŽAN' if eia['lng_chg'] > 0 else 'STABILAN'}**")
 
 st.markdown("---")
-
-# --- 3. ATMOSPHERIC TRENDS ---
-st.subheader("📈 Index Forecast Trends & Momentum")
-v1, v2, v3 = st.columns(3)
-
-def draw_idx(col, title, d, b, c_class, inv, legend):
-    with col:
-        st.image(f"https://www.cpc.ncep.noaa.gov/products/precip/CWlink/daily_ao_index/{title.lower()}.sprd2.gif" if title=="AO" else f"https://www.cpc.ncep.noaa.gov/products/precip/CWlink/pna/{title.lower()}.sprd2.gif")
-        st.markdown(f"**{title} INDEX**")
-        st.markdown(f"<span style='font-size:1.8rem; font-weight:800;'>{d['now']:.2f}</span>", unsafe_allow_html=True)
-        st.markdown(f"<span class='status-box {c_class}'>{b}</span>", unsafe_allow_html=True)
-        y_d = d['now']-d['y']
-        y_col = "#00FF00" if (y_d < 0 if inv else y_d > 0) else "#FF4B4B"
-        st.markdown(f"<div style='font-size:0.85rem; margin-top:10px;'><span style='color:{y_col}'>vs yest: {y_d:+.2f}</span> | vs week: {d['now']-d['w']:+.2f}</div>", unsafe_allow_html=True)
-        st.markdown(f"<div class='legend-text'>{legend}</div>", unsafe_allow_html=True)
-
-draw_idx(v1, "AO", ao_d, ao_b, ao_c, True, "Crna linija ISPOD 0 = BULLISH (Hladnije)")
-draw_idx(v2, "NAO", nao_d, nao_b, nao_c, True, "Crna linija ISPOD 0 = BULLISH (Hladnije)")
-draw_idx(v3, "PNA", pna_d, *get_color_logic(pna_d['now'], "PNA"), False, "Crna linija IZNAD 0 = BULLISH (Hladnije)")
-
-# --- 4. EIA & COT COUNTDOWN ---
-st.subheader("🛢️ Storage Reporting & Countdowns")
-e1, e2, e3 = st.columns(3)
-if storage:
-    e1.metric("Zadnje zalihe", f"{storage['curr']} Bcf", f"{storage['chg']} Bcf", delta_color="inverse")
-    e2.metric("vs 5y Average", f"{storage['diff_5y']:+} Bcf", delta_color="inverse")
-
-with e3:
-    def get_cd(d, h, m):
-        n = datetime.now(timezone.utc)
-        t = (n + timedelta(days=(d - n.weekday()) % 7)).replace(hour=h, minute=m, second=0)
-        if n >= t: t += timedelta(days=7)
-        df = t - n
-        return f"{int(df.total_seconds()//3600)}h {int((df.total_seconds()%3600)//60)}m"
-    st.write(f"⌛ COT Countdown: {get_cd(4, 20, 30)}")
-    st.write(f"⌛ EIA Countdown: {get_cd(3, 15, 30)}")
+st.image("https://www.cpc.ncep.noaa.gov/products/precip/CWlink/daily_ao_index/ao.sprd2.gif", caption="AO Index (Crna linija ISPOD 0 = BULLISH)")
